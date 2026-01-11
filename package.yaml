@@ -1,0 +1,129 @@
+name:                map-monitor
+version:             0.1.0.0
+github:              "githubuser/map-monitor"
+license:             BSD-3-Clause
+author:              "Author name here"
+maintainer:          "example@example.com"
+copyright:           "2026 Author name here"
+
+extra-source-files:
+- README.md
+- CHANGELOG.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Web
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/githubuser/map-monitor#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+- temporary
+- typed-process
+- rio
+- servant
+- aeson
+- ixset-typed
+- acid-state
+- safecopy
+- protolude
+- containers
+- unordered-containers
+- http-types
+- http-client
+- http-client-tls
+- servant-client
+- servant-server
+- wai
+- wai-extra
+- warp
+- clock
+- stm
+- dhall
+- lens
+- time
+- unliftio
+- either
+- barbies
+- cereal
+- data-default
+- async
+- async-pool
+- http-api-data
+- servant-auth
+- servant-auth-server
+- network
+- wai-middleware-prometheus
+- prometheus-client
+- prometheus-metrics-ghc
+
+default-extensions:
+- LambdaCase
+- NoImplicitPrelude
+- OverloadedStrings
+- TypeApplications
+- FlexibleContexts
+- FlexibleInstances
+- TypeFamilies
+- TypeOperators
+- DataKinds
+- ViewPatterns
+- BlockArguments
+
+ghc-options:
+- -Wall
+- -Wcompat
+- -Widentities
+- -Wincomplete-record-updates
+- -Wincomplete-uni-patterns
+- -Wmissing-export-lists
+- -Wmissing-home-modules
+- -Wpartial-fields
+- -Wredundant-constraints
+
+flags:
+  static:
+    description: Statically link executables.
+    manual: true
+    default: false
+
+library:
+  source-dirs: src
+
+executables:
+  map-monitor-exe:
+    main:                Main.hs
+    source-dirs:         app
+    when:
+      - condition: flag(static)
+        then:
+          ld-options: -static
+          ghc-options:
+            - -threaded
+            - -rtsopts
+            - -with-rtsopts=-N
+            - -optc-Os
+            - -optl=-pthread
+            - -optl=-static
+            - -fPIC
+        else:
+          ghc-options:
+            - -threaded
+            - -rtsopts
+            - -with-rtsopts=-N
+    dependencies:
+    - map-monitor
+
+tests:
+  map-monitor-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - map-monitor

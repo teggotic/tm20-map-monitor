@@ -1,0 +1,250 @@
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TemplateHaskell #-}
+
+module MapMonitor.Server
+where
+
+import Control.Category (id)
+import Control.Lens
+import Control.Lens.TH
+import Data.Acid
+import qualified Data.Map as Map
+import MapMonitor.API
+import MapMonitor.API.OpenPlanet
+import MapMonitor.CachedAPIResponses
+import MapMonitor.Common
+import MapMonitor.DB
+import MapMonitor.Integrations (addMissingMaps)
+import qualified Network.HTTP.Types as H
+import Network.Wai as Wai
+import Protolude hiding (atomically)
+import RIO (toStrictBytes)
+import RIO.Prelude.Types
+import qualified RIO.Text as Text
+import RIO.Time
+import Servant
+import Servant.Auth.Server
+import Servant.Client
+import Servant.Server
+import UnliftIO.STM
+
+data AppState
+  = AppState
+  { _appState_acid :: AcidState MapMonitorState
+  , _appState_unbeatenAtsCache :: TVar UnbeatenAtsResponse
+  , _appState_beatenAtsCache :: TVar RecentlyBeatenAtsResponse
+  , _appState_coreNadeoClient :: ClientEnv
+  , _appState_liveServicesNadeoClient :: ClientEnv
+  , _appState_tmxClient :: ClientEnv
+  , _appState_xertrovClient :: ClientEnv
+  , _appState_openPlanetClient :: ClientEnv
+  , _appState_nadeoToken :: TMVar (Maybe NadeoTokenState)
+  , _appState_settings :: AppSettings
+  , _appState_jwtSettings :: JWTSettings
+  }
+
+$(makeLenses ''AppState)
+
+instance HasAppSettings AppState where
+  appSettingsL = appState_settings
+
+instance HasState AppState where
+  stateL = appState_acid
+
+instance HasState (AcidState MapMonitorState) where
+  stateL = id
+
+instance HasNadeoCoreClient AppState where
+  nadeoCoreClientL = appState_coreNadeoClient
+
+instance HasXertrovClient AppState where
+  xertrovClientL = appState_xertrovClient
+
+instance HasNadeoLiveClient AppState where
+  nadeoLiveClientL = appState_liveServicesNadeoClient
+
+instance HasTMXClient AppState where
+  tmxClientL = appState_tmxClient
+
+instance HasOpenPlanetClient AppState where
+  openPlanetClientL = appState_openPlanetClient
+
+instance HasNadeoTokenState AppState where
+  nadeoTokenStateL = appState_nadeoToken
+
+instance HasUnbeatenAtsCache AppState where
+  unbeatenAtsCacheL = appState_unbeatenAtsCache
+
+instance HasBeatenAtsCache AppState where
+  beatenAtsCacheL = appState_beatenAtsCache
+
+type AppM = ReaderT AppState Servant.Server.Handler
+
+mapMonitorAPI :: Proxy MapMonitorAPI
+mapMonitorAPI = Proxy
+redirectTo :: Text -> Wai.Response
+redirectTo url =
+  responseLBS
+    H.status301
+    [(H.hContentType, "text/plain"), (H.hLocation, encodeUtf8 url)]
+    "Redirect"
+
+downloadMapsServer :: ServerT DownloadMapAPI AppM
+downloadMapsServer = downloadMap
+ where
+  downloadMap :: Int -> ServerT Raw AppM
+  downloadMap mapId = Tagged $ \_ resp -> do
+    resp $ redirectTo $ "https://trackmania.exchange/maps/download/" <> show mapId
+
+tmxApiServer :: ServerT TMXApi AppM
+tmxApiServer = unbeaten :<|> unbeatenLeaderboard :<|> beaten
+ where
+  beaten = do
+    readTVarIO =<< view beatenAtsCacheL
+
+  unbeatenLeaderboard = do
+    return $
+      UnbeatenAtsLeaderboardResponse
+        { _ualr_count_to_pos = mempty
+        , _ualr_players = [("c331bdbf-2182-4a51-813d-87d6f0f209c5", 1)]
+        , _ualr_nb_players = 1
+        , _ualr__info = "{ count_to_pos: {[score]: (rank, nb_eq_players)}, players: [(user, score)] }"
+        }
+
+  unbeaten = do
+    readTVarIO =<< view unbeatenAtsCacheL
+
+managementApiServer :: AuthResult AUser -> ServerT ManagementAPI AppM
+managementApiServer (Authenticated auser) = managementReportMap :<|> managementAddMissingMap
+ where
+  managementReportMap tmxId payload = do
+    now <- getCurrentTime
+    withAcid2 reportMap (TMXId tmxId) (_auser_uid auser, now, _rmp_reason payload)
+    refreshCaches
+    return NoContent
+
+  managementAddMissingMap tmxId = do
+    st <- ask
+    liftIO $ flip runReaderT st $ do
+      addMissingMaps [tmxId]
+    refreshCaches
+    return NoContent
+managementApiServer _ = throwAll err404
+
+trustedUsers :: [Text]
+trustedUsers = ["c331bdbf-2182-4a51-813d-87d6f0f209c5"]
+
+authApiServer :: ServerT AuthAPI AppM
+authApiServer = authOpenplanetToken :<|> authIsTrusted
+ where
+  authOpenplanetToken tok = do
+    openplanetSecret <- _settings_openplanetAuthSecret <$> view appSettingsL
+    view openPlanetClientL
+      >>= liftIO
+      . runClientM (openPlanetAuthValidate $ OpenPlanetAuthValidateRequest{_opavr_token = (_ia_token tok), _opavr_secret = openplanetSecret})
+      >>= \case
+        Left err -> do
+          print err
+          throwError err401
+        Right (OpenPlanetAuthValidateResponse{_opavr_account_id = accountId}) -> do
+          if accountId `elem` trustedUsers
+            then do
+              ajwt <- asks _appState_jwtSettings
+              now <- getCurrentTime
+              Right newTokBs <- liftIO $ makeJWT (AUser accountId) ajwt (Just $ (secondsToNominalDiffTime $ 60 * 60 * 24) `addUTCTime` now)
+              return $ InternalAuth{_ia_token = decodeUtf8 $ toStrictBytes newTokBs}
+            else throwAll err401
+
+  authIsTrusted accountId = do
+    return $ accountId `elem` trustedUsers
+
+server1 :: ServerT MapMonitorAPI AppM
+server1 = tmxApiServer :<|> downloadMapsServer :<|> managementApiServer :<|> authApiServer
+
+fallbackApp :: Application
+fallbackApp req respond = do
+  respond $ responseLBS H.status404 [] ";...;"
+
+app :: Servant.Server.Context '[CookieSettings, JWTSettings] -> AppState -> Application
+app cfg state req respond = do
+  let servantApp =
+        serveWithContext mapMonitorAPI cfg $
+          hoistServerWithContext
+            mapMonitorAPI
+            (Proxy :: Proxy '[CookieSettings, JWTSettings])
+            (`runReaderT` state)
+            server1
+  servantApp req $ \res ->
+    if is404 res
+      then fallbackApp req respond
+      else respond res
+
+is404 :: Wai.Response -> Bool
+is404 res =
+  case Wai.responseStatus res of
+    s -> H.statusCode s == 404
+
+collectBeatenAtsResponse :: (MonadIO m, MonadReader env m, HasState env) => m RecentlyBeatenAtsResponse
+collectBeatenAtsResponse = do
+  beatenmaps <- queryAcid GetBeatenMaps
+  let
+    allMaps = take 200 $ toRow <$> beatenmaps
+    below100k = take 200 $ toRow <$> filter (\tmmap -> unTMXId (_tmm_tmxId tmmap) < 100000) beatenmaps
+  return $
+    RecentlyBeatenAtsResponse
+      { _rbar_keys = ["TrackID", "TrackUID", "Track_Name", "AuthorLogin", "Tags", "MapType", "AuthorTime", "WR", "LastChecked", "ATBeatenTimestamp", "ATBeatenUsers", "NbPlayers"]
+      , _rbar_all = RecentlyBeatenAtsTracks (length allMaps) allMaps
+      , _rbar_below100k = RecentlyBeatenAtsTracks (length below100k) below100k
+      }
+ where
+  toRow tmmap =
+    ( _tmm_tmxId tmmap
+    , _tmm_uid tmmap
+    , _tmm_name tmmap
+    , fromMaybe "N/A" (_tmm_authorUid tmmap)
+    , Text.intercalate "," (show <$> _tmm_tags tmmap)
+    , "TM_Race"
+    , _tmm_authorMedal tmmap
+    , fromMaybe (-1) (_tmmr_time <$> _tmm_currentWR tmmap)
+    , fromMaybe (-1) (_tmmr_timestamp <$> _tmm_currentWR tmmap)
+    , fromMaybe (-1) (_tmmr_timestamp <$> _tmm_currentWR tmmap)
+    , fromMaybe "N/A" (_tmmr_userId <$> _tmm_currentWR tmmap)
+    , fromMaybe 123456 (_tmm_nbPlayers tmmap)
+    )
+
+collectUnbeatenAtsResponse :: (MonadIO m, MonadReader env m, HasState env) => m UnbeatenAtsResponse
+collectUnbeatenAtsResponse = do
+  allMaps <- queryAcid GetMaps
+  let
+    unbeatenMaps =
+      flip fmap (filter (\tmmap -> isNothing (_tmm_hiddenReason tmmap) && isJust (_tmm_authorUid tmmap)) allMaps) $ \tmmap ->
+        ( _tmm_tmxId tmmap
+        , _tmm_uid tmmap
+        , _tmm_name tmmap
+        , fromMaybe "N/A" (_tmm_authorUid tmmap)
+        , Text.intercalate "," (show <$> _tmm_tags tmmap)
+        , "TM_Race"
+        , _tmm_authorMedal tmmap
+        , fromMaybe (-1) (_tmmr_time <$> _tmm_currentWR tmmap)
+        , 0
+        , fromMaybe 123456 (_tmm_nbPlayers tmmap)
+        , isJust (_tmm_hiddenReason tmmap)
+        , fromMaybe "" (_tmm_hiddenReason tmmap)
+        , fromMaybe False (_tmm_atSetByPlugin tmmap)
+        , (\(k, (_, r)) -> (k, r)) <$> Map.assocs (_tmm_reportedBy tmmap)
+        )
+
+  return $
+    UnbeatenAtsResponse
+      { _uar_keys = ["TrackID", "TrackUID", "Track_Name", "AuthorLogin", "Tags", "MapType", "AuthorTime", "WR", "LastChecked", "NbPlayers", "IsHidden", "Reason", "AtSetByPlugin", "Reported"]
+      , _uar_tracks = unbeatenMaps
+      , _uar_nbTracks = length unbeatenMaps
+      }
+
+refreshCaches :: (MonadIO m, MonadReader env m, HasState env, HasBeatenAtsCache env, HasUnbeatenAtsCache env) => m ()
+refreshCaches = do
+  view unbeatenAtsCacheL >>= \c ->
+    atomically . writeTVar c =<< collectUnbeatenAtsResponse
+  view beatenAtsCacheL >>= \c ->
+    atomically . writeTVar c =<< collectBeatenAtsResponse

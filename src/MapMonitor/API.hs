@@ -1,0 +1,60 @@
+{-# LANGUAGE TemplateHaskell #-}
+
+module MapMonitor.API
+where
+
+import Data.Aeson
+import Data.Aeson.TH
+import MapMonitor.CachedAPIResponses
+import RIO.List
+import RIO.Prelude.Types
+import qualified RIO.Text as Text
+import Servant.API
+import Servant.Auth
+import Servant.Auth.JWT
+
+data AUser = AUser
+  { _auser_uid :: Text
+  }
+  deriving (Show)
+
+$(deriveJSON defaultOptions{fieldLabelModifier = drop (Text.length "_auser_")} ''AUser)
+instance FromJWT AUser
+instance ToJWT AUser
+
+data InternalAuth
+  = InternalAuth
+  { _ia_token :: Text
+  }
+  deriving (Show)
+
+$(deriveJSON defaultOptions{fieldLabelModifier = drop (Text.length "_ia_")} ''InternalAuth)
+
+type DownloadMapAPI =
+  "maps" :> "download" :> Capture "mapId" Int :> Raw
+
+type TMXApi =
+  "tmx"
+    :> ( "unbeaten_ats" :> Get '[JSON] UnbeatenAtsResponse
+           :<|> "unbeaten_ats" :> "leaderboard" :> Get '[JSON] UnbeatenAtsLeaderboardResponse
+           :<|> "recently_beaten_ats" :> Get '[JSON] RecentlyBeatenAtsResponse
+       )
+
+data ReportMapPayload
+  = ReportMapPayload
+  { _rmp_reason :: Text
+  }
+  deriving (Show)
+
+$(deriveJSON defaultOptions{fieldLabelModifier = drop (Text.length "_rmp_")} ''ReportMapPayload)
+
+type ManagementAPI =
+  ( "management" :> "report_map" :> Capture "mapId" Int :> ReqBody '[JSON] ReportMapPayload :> Post '[JSON] NoContent
+      :<|> "management" :> "add_missing_map" :> Capture "mapId" Int :> Post '[JSON] NoContent
+  )
+
+type AuthAPI =
+  "auth" :> "openplanet" :> ReqBody '[JSON] InternalAuth :> Post '[JSON] InternalAuth
+    :<|> "auth" :> "is-trusted" :> Capture "accountId" Text :> Get '[JSON] Bool
+
+type MapMonitorAPI = TMXApi :<|> DownloadMapAPI :<|> (Auth '[JWT] AUser :> ManagementAPI) :<|> AuthAPI

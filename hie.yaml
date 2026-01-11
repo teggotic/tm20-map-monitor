@@ -1,0 +1,19 @@
+cradle:
+  stack:
+    - path: "./src"
+      component: "map-monitor:lib"
+
+    - path: "./app/Main.hs"
+      component: "map-monitor:exe:map-monitor-exe"
+
+    - path: "./test"
+      component: "map-monitor:test:map-monitor-test"
+
+    - path: "deps/ixset-typed/src"
+      component: "ixset-typed:lib"
+
+    - path: "deps/ixset-typed/tests"
+      component: "ixset-typed:test:test-ixset-typed"
+
+    - path: "./.stack-work"
+      component: "map-monitor:lib"

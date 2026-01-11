@@ -1,0 +1,238 @@
+cabal-version: 2.2
+
+-- This file has been generated from package.yaml by hpack version 0.38.1.
+--
+-- see: https://github.com/sol/hpack
+
+name:           map-monitor
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/githubuser/map-monitor#readme>
+homepage:       https://github.com/githubuser/map-monitor#readme
+bug-reports:    https://github.com/githubuser/map-monitor/issues
+author:         Author name here
+maintainer:     example@example.com
+copyright:      2026 Author name here
+license:        BSD-3-Clause
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    README.md
+    CHANGELOG.md
+
+source-repository head
+  type: git
+  location: https://github.com/githubuser/map-monitor
+
+flag static
+  description: Statically link executables.
+  manual: True
+  default: False
+
+library
+  exposed-modules:
+      Lib
+      MapMonitor.API
+      MapMonitor.API.Nadeo
+      MapMonitor.API.OpenPlanet
+      MapMonitor.API.TMX
+      MapMonitor.API.XertroV
+      MapMonitor.ATCheck
+      MapMonitor.CachedAPIResponses
+      MapMonitor.Common
+      MapMonitor.DB
+      MapMonitor.Integrations
+      MapMonitor.Server
+  other-modules:
+      Paths_map_monitor
+  autogen-modules:
+      Paths_map_monitor
+  hs-source-dirs:
+      src
+  default-extensions:
+      LambdaCase
+      NoImplicitPrelude
+      OverloadedStrings
+      TypeApplications
+      FlexibleContexts
+      FlexibleInstances
+      TypeFamilies
+      TypeOperators
+      DataKinds
+      ViewPatterns
+      BlockArguments
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  build-depends:
+      acid-state
+    , aeson
+    , async
+    , async-pool
+    , barbies
+    , base >=4.7 && <5
+    , cereal
+    , clock
+    , containers
+    , data-default
+    , dhall
+    , either
+    , http-api-data
+    , http-client
+    , http-client-tls
+    , http-types
+    , ixset-typed
+    , lens
+    , network
+    , prometheus-client
+    , prometheus-metrics-ghc
+    , protolude
+    , rio
+    , safecopy
+    , servant
+    , servant-auth
+    , servant-auth-server
+    , servant-client
+    , servant-server
+    , stm
+    , temporary
+    , time
+    , typed-process
+    , unliftio
+    , unordered-containers
+    , wai
+    , wai-extra
+    , wai-middleware-prometheus
+    , warp
+  default-language: Haskell2010
+
+executable map-monitor-exe
+  main-is: Main.hs
+  other-modules:
+      Paths_map_monitor
+  autogen-modules:
+      Paths_map_monitor
+  hs-source-dirs:
+      app
+  default-extensions:
+      LambdaCase
+      NoImplicitPrelude
+      OverloadedStrings
+      TypeApplications
+      FlexibleContexts
+      FlexibleInstances
+      TypeFamilies
+      TypeOperators
+      DataKinds
+      ViewPatterns
+      BlockArguments
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  build-depends:
+      acid-state
+    , aeson
+    , async
+    , async-pool
+    , barbies
+    , base >=4.7 && <5
+    , cereal
+    , clock
+    , containers
+    , data-default
+    , dhall
+    , either
+    , http-api-data
+    , http-client
+    , http-client-tls
+    , http-types
+    , ixset-typed
+    , lens
+    , map-monitor
+    , network
+    , prometheus-client
+    , prometheus-metrics-ghc
+    , protolude
+    , rio
+    , safecopy
+    , servant
+    , servant-auth
+    , servant-auth-server
+    , servant-client
+    , servant-server
+    , stm
+    , temporary
+    , time
+    , typed-process
+    , unliftio
+    , unordered-containers
+    , wai
+    , wai-extra
+    , wai-middleware-prometheus
+    , warp
+  default-language: Haskell2010
+  if flag(static)
+    ghc-options: -threaded -rtsopts -with-rtsopts=-N -optc-Os -optl=-pthread -optl=-static -fPIC
+    ld-options: -static
+  else
+    ghc-options: -threaded -rtsopts -with-rtsopts=-N
+
+test-suite map-monitor-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      Paths_map_monitor
+  autogen-modules:
+      Paths_map_monitor
+  hs-source-dirs:
+      test
+  default-extensions:
+      LambdaCase
+      NoImplicitPrelude
+      OverloadedStrings
+      TypeApplications
+      FlexibleContexts
+      FlexibleInstances
+      TypeFamilies
+      TypeOperators
+      DataKinds
+      ViewPatterns
+      BlockArguments
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      acid-state
+    , aeson
+    , async
+    , async-pool
+    , barbies
+    , base >=4.7 && <5
+    , cereal
+    , clock
+    , containers
+    , data-default
+    , dhall
+    , either
+    , http-api-data
+    , http-client
+    , http-client-tls
+    , http-types
+    , ixset-typed
+    , lens
+    , map-monitor
+    , network
+    , prometheus-client
+    , prometheus-metrics-ghc
+    , protolude
+    , rio
+    , safecopy
+    , servant
+    , servant-auth
+    , servant-auth-server
+    , servant-client
+    , servant-server
+    , stm
+    , temporary
+    , time
+    , typed-process
+    , unliftio
+    , unordered-containers
+    , wai
+    , wai-extra
+    , wai-middleware-prometheus
+    , warp
+  default-language: Haskell2010

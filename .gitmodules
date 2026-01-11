@@ -1,0 +1,3 @@
+[submodule "deps/ixset-typed"]
+	path = deps/ixset-typed
+	url = git@github.com:teggotic/ixset-typed.git

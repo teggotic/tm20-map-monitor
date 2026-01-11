@@ -1,0 +1,4 @@
+.stack-work/
+*~
+/state/
+/settings.dhall

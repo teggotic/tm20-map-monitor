@@ -1,0 +1,13 @@
+snapshot: lts-24.11
+
+packages:
+- .
+- deps/ixset-typed
+
+extra-deps: []
+
+docker:
+  enable: false
+  image: "alpine-ghc-9.10.2:latest"
+  stack-exe: image
+
