@@ -7,7 +7,6 @@ where
 
 import Control.Category (id)
 import Control.Lens
-import Control.Lens.TH
 import Data.Acid
 import qualified Data.Map as Map
 import MapMonitor.API
@@ -20,7 +19,6 @@ import qualified Network.HTTP.Types as H
 import Network.Wai as Wai
 import Protolude hiding (atomically)
 import RIO (toStrictBytes)
-import RIO.Prelude.Types
 import qualified RIO.Text as Text
 import RIO.Time
 import Servant
@@ -119,6 +117,7 @@ managementApiServer :: AuthResult AUser -> ServerT ManagementAPI AppM
 managementApiServer (Authenticated auser) = managementReportMap :<|> managementAddMissingMap
  where
   managementReportMap tmxId payload = do
+    -- putText $ "Reporting map: " <> show tmxId <> " with payload: " <> show payload
     now <- getCurrentTime
     withAcid2 reportMap (TMXId tmxId) (_auser_uid auser, now, _rmp_reason payload)
     refreshCaches
@@ -133,7 +132,7 @@ managementApiServer (Authenticated auser) = managementReportMap :<|> managementA
 managementApiServer _ = throwAll err404
 
 trustedUsers :: [Text]
-trustedUsers = ["c331bdbf-2182-4a51-813d-87d6f0f209c5"]
+trustedUsers = ["c331bdbf-2182-4a51-813d-87d6f0f209c5", "65ce1935-d166-42b3-89a6-6345ccf41865", "59b84907-59fb-4455-b31d-b0cc44c36ec7", "bce4d579-dc66-43b5-9d57-eb1fb58dd450"]
 
 authApiServer :: ServerT AuthAPI AppM
 authApiServer = authOpenplanetToken :<|> authIsTrusted
@@ -168,6 +167,7 @@ fallbackApp req respond = do
 
 app :: Servant.Server.Context '[CookieSettings, JWTSettings] -> AppState -> Application
 app cfg state req respond = do
+  -- putText $ "Request: " <> show req
   let servantApp =
         serveWithContext mapMonitorAPI cfg $
           hoistServerWithContext
@@ -218,7 +218,7 @@ collectUnbeatenAtsResponse = do
   allMaps <- queryAcid GetMaps
   let
     unbeatenMaps =
-      flip fmap (filter (\tmmap -> isNothing (_tmm_hiddenReason tmmap) && isJust (_tmm_authorUid tmmap)) allMaps) $ \tmmap ->
+      flip fmap (filter (\tmmap -> isJust (_tmm_authorUid tmmap)) allMaps) $ \tmmap ->
         ( _tmm_tmxId tmmap
         , _tmm_uid tmmap
         , _tmm_name tmmap
