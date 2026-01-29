@@ -59,6 +59,9 @@ dependencies:
 - wai-middleware-prometheus
 - prometheus-client
 - prometheus-metrics-ghc
+- retry
+- conduit
+- directory
 
 default-extensions:
 - LambdaCase

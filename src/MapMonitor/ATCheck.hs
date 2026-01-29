@@ -46,10 +46,10 @@ checkAtSetByPlugin tmxId = do
                     Just report -> do
                       if _mvcr_validated report == "Yes"
                         then do
-                          putText $ "Map is valid"
+                          -- putText $ "Map is valid"
                           return $ Just False
                         else do
-                          putText $ "Map is invalid: " <> show (_mvcr_note report)
+                          -- putText $ "Map is invalid: " <> show (_mvcr_note report)
                           return $ Just True
                 (ExitFailure _, (tshow -> out)) -> do
                   putText $ "Failed to run AT validation" <> out

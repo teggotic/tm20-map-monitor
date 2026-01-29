@@ -1,16 +1,8 @@
-module MapMonitor.Integrations (
-  rescanMaps,
-  refreshNbPlayers,
-  refreshUnbeatenMaps,
-  refreshRecentUnbeatenMaps,
-  refreshMissingInfo,
-  addMissingMaps,
-  scanTmxMaps,
-)
+module MapMonitor.Integrations
 where
 
 import Control.Lens
-import Data.Acid (AcidState)
+import UnliftIO.Retry
 import Data.List (last)
 import qualified Data.Set as Set
 import GHC.Exts
@@ -27,37 +19,29 @@ import Servant.Client
 import System.Clock (Clock (Monotonic), diffTimeSpec, getTime, toNanoSecs)
 import UnliftIO
 import UnliftIO.Concurrent
+import Conduit
+
+iterTmxMaps :: (MonadIO m, MonadReader env m, HasTMXClient env) => Int -> Maybe Int -> ConduitT () TMMap m ()
+iterTmxMaps cnt after = do
+  respE <- runInClient tmxClientL $ tmxSearchMaps $ TMXSearchMaps{_tmxsm_ids = [], _tmxsm_count = Just (cnt `min` 200), _tmxsm_after = after, _tmxsm_from = Nothing, _tmxsm_order1 = Just 6}
+
+  case respE of
+    Left err -> do
+      putText $ "Error: " <> show err
+    Right resp -> do
+      yieldMany $ tmxMapToTMMap <$> _tmxsr_Results resp
+      when (_tmxsr_More resp) $ do
+        iterTmxMaps cnt (Just $ _tmxsm_MapId $ last $ _tmxsr_Results resp)
+
+recheckTmxForLatestMissingMaps :: (MonadReader env m, HasState env, HasTMXClient env,  HasNadeoLiveClient env, MonadFail m, HasNadeoTokenState env,  HasAppSettings env, HasNadeoCoreClient env, MonadUnliftIO m) => Int -> m ()
+recheckTmxForLatestMissingMaps cnt = do
+  ids <- getAllKnownIds
+  maps <- runConduit $ iterTmxMaps cnt Nothing .| takeC cnt .|  filterC (\tmmap -> not $ unTMXId (_tmm_tmxId tmmap) `elem` ids) .| sinkList
+  collectUnknownMaps maps
 
 chunked :: Int -> [a] -> [[a]]
 chunked _ [] = []
 chunked n xs = take n xs : chunked n (drop n xs)
-
-getNewMaps :: (MonadReader env m, MonadIO m, HasTMXClient env) => Set Int -> Maybe Int -> m [TMMap]
-getNewMaps known' after' = do
-  putText $ "Known maps: " <> show (length known')
-  view tmxClientL >>= liftIO . runClientM (go known' after') >>= \case
-    Left err -> do
-      putText $ "Error: " <> show err
-      return []
-    Right res -> do
-      putText $ "Got " <> show (length res) <> " new maps"
-      return $ tmxMapToTMMap <$> res
- where
-  go known after = do
-    putText $ "Getting new maps from " <> show after
-    res <- tmxSearchMaps $ TMXSearchMaps{_tmxsm_ids = [], _tmxsm_count = Just 100, _tmxsm_after = after, _tmxsm_from = Nothing, _tmxsm_order1 = Just 6}
-    let maps = _tmxsr_Results res
-    putText $ "Got " <> show (length maps) <> " maps"
-    let lastTmxId = last (_tmxsm_MapId <$> maps)
-    putText $ "Got map " <> show (_tmxsm_MapId <$> maps)
-    putText $ "from " <> show (head (_tmxsm_MapId <$> maps)) <> " to " <> show lastTmxId
-    if isJust $ find (\tmx -> _tmxsm_MapId tmx `elem` known) (_tmxsr_Results res)
-      then do
-        return $ fst $ break (\tmx -> _tmxsm_MapId tmx `elem` known) (_tmxsr_Results res)
-      else do
-        threadDelay (1 * 1000 * 1000)
-        moreMaps <- go known (Just lastTmxId)
-        return $ maps ++ moreMaps
 
 pullKnownMaps :: [Int] -> ClientM [TMXSearchMapsMap]
 pullKnownMaps [] = return []
@@ -77,17 +61,16 @@ pullKnownMaps frm = do
 loadNadeoMapsInfo :: (MonadIO m, HasNadeoLiveClient env, MonadReader env m, MonadFail m, HasNadeoTokenState env, HasAppSettings env, HasNadeoCoreClient env) => [TMMap] -> m [TMMapPatch]
 loadNadeoMapsInfo tmmaps = do
   let uidDict = fromList $ fmap (\tmmap -> (_tmm_uid tmmap, defPatch $ _tmm_tmxId tmmap)) tmmaps
-  liveServicesNadeoClient <- view nadeoLiveClientL
   updates <- forM (chunked 100 tmmaps) $ \maps -> do
     res <- withAccessToken \token ->
-      liftIO $ runClientM (nadeoGetMapMultiple token (IdsList $ fmap _tmm_uid maps)) liveServicesNadeoClient
+      runInClient nadeoLiveClientL $ nadeoGetMapMultiple token (IdsList $ fmap _tmm_uid maps)
     threadDelay (1000 * 1000)
     case res of
       Left err -> do
         putText $ "Error: " <> show err
         return []
       Right res -> do
-        print res
+        -- print res
         return $ (\mp -> (mp, _gmmrm_uid mp)) <$> (_gmmr_mapList res)
   let
     xx =
@@ -117,9 +100,8 @@ refreshRecords maps = do
     let diffNs = toNanoSecs (diffTimeSpec now start)
         diffSec = fromIntegral diffNs / 1e9 :: Double
     putText $ "Pulling records for map #" <> show i <> "/" <> show (length maps) <> ": " <> show (_tmm_uid tmmap) <> " (" <> show diffSec <> "s)"
-    liveServicesNadeoClient <- view nadeoLiveClientL
     records <- withAccessToken \accessToken -> do
-      liftIO $ flip runClientM liveServicesNadeoClient $ nadeoGetMapLeaderboard (_tmm_uid tmmap) accessToken 1 "true"
+      runInClient nadeoLiveClientL $ nadeoGetMapLeaderboard (_tmm_uid tmmap) accessToken 1 "true"
     updatedMap <- case records of
       Left err -> do
         putText $ "Error: " <> show err
@@ -149,12 +131,11 @@ withAccessToken m = do
           Just tok <- newToken
           return tok
   atomically $ putTMVar tokenStateRef (Just tokState)
-  m $ NadeoTokenHeader $ _nadeoTokenState_accessToken tokState
+  m (NadeoTokenHeader $ _nadeoTokenState_accessToken tokState)
  where
   newToken = do
     settings <- view appSettingsL
-    coreNadeoClient <- view nadeoCoreClientL
-    accessTokenE <- liftIO $ runClientM (authorizeNadeo ("Basic " <> _settings_auth settings) (NadeoBasicAuthRequestBody "NadeoLiveServices")) coreNadeoClient
+    accessTokenE <- runInClient nadeoCoreClientL $ authorizeNadeo ("Basic " <> _settings_auth settings) (NadeoBasicAuthRequestBody "NadeoLiveServices")
     case accessTokenE of
       Left err -> do
         putText $ "Error: " <> show err
@@ -182,16 +163,6 @@ getAllKnownIds = do
   st <- queryAcid GetMapMonitorState
   return $ fromList $ fmap (unTMXId . _tmm_tmxId) $ (Map.elems $ mms_ubeatenMaps st) <> mms_beatenMaps st
 
-scanTmxMaps :: (MonadFail m, MonadReader env m, HasState env, HasNadeoTokenState env, HasNadeoCoreClient env, HasNadeoLiveClient env, HasTMXClient env, HasAppSettings env, MonadUnliftIO m) => m ()
-scanTmxMaps = do
-  putText "Scanning for new TMX maps"
-  ids <- getAllKnownIds
-
-  newMaps <- take 10 <$> getNewMaps ids Nothing
-  updateAcid (AddNewMaps (zip (_tmm_tmxId <$> newMaps) newMaps))
-
-  collectUnknownMaps newMaps
-
 collectUnknownMaps :: (MonadReader env m, HasState env, HasNadeoLiveClient env, MonadFail m, HasNadeoTokenState env, HasAppSettings env, HasNadeoCoreClient env, MonadUnliftIO m) => [TMMap] -> m ()
 collectUnknownMaps [] = pass
 collectUnknownMaps newMaps = do
@@ -206,8 +177,9 @@ collectUnknownMaps newMaps = do
     doCheckAtSetByPlugin =
       void $
         withAcid1 updateMaps
-          =<< forM mapsWithUserInfo \tmmap -> do
+          =<< flip (pooledMapConcurrentlyN 4) (zip [(1::Int)..] mapsWithUserInfo) \(i, tmmap) -> do
             atSetByPlugin <- checkAtSetByPlugin (unTMXId $ _tmm_tmxId tmmap)
+            putText $ "Checking AT set by plugin for map #" <> show (unTMXId $ _tmm_tmxId tmmap) <> "(" <> show i <> "/" <> show (length mapsWithUserInfo) <> "): " <> show atSetByPlugin
             return $ (defPatch $ _tmm_tmxId tmmap){_tmmp_atSetByPlugin = Just atSetByPlugin}
 
   concurrently_ doRefreshRecords doCheckAtSetByPlugin
@@ -222,7 +194,7 @@ addMissingMaps ids = do
   if null newMaps
     then pass
     else do
-      resE <- view tmxClientL >>= liftIO . runClientM (pullKnownMaps ids)
+      resE <- runInClient tmxClientL $ pullKnownMaps ids
       case resE of
         Left err -> putText $ "Error: " <> show err
         Right res -> do
@@ -265,7 +237,7 @@ refreshNbPlayers :: (MonadReader env m, HasState env, HasXertrovClient env, Mona
 refreshNbPlayers = do
   maps <- filter (isJust . _tmm_authorUid) <$> queryAcid GetMaps
   flip (pooledMapConcurrentlyN_ 4) maps \tmmap -> do
-    view xertrovClientL >>= liftIO . runClientM (xertrovGetNbPlayers (_tmm_uid tmmap)) >>= \case
+    runInClient xertrovClientL (xertrovGetNbPlayers (_tmm_uid tmmap)) >>= \case
       Left err -> do
         putText $ show (_tmm_tmxId tmmap) <> ": error: " <> show err
       Right res -> do

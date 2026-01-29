@@ -17,6 +17,7 @@ module MapMonitor.Common (
   updateAcid,
   withAcid1,
   withAcid2,
+  runInClient,
 )
 where
 
@@ -30,6 +31,7 @@ import MapMonitor.DB
 import Protolude
 import Servant.Client
 import UnliftIO.STM
+import UnliftIO.Retry
 
 data NadeoTokenState
   = NadeoTokenState
@@ -93,3 +95,16 @@ withAcid2 :: (MonadReader env m, HasState env) => (AcidState MapMonitorState -> 
 withAcid2 m a b = do
   acid <- view stateL
   m acid a b
+
+limitedBackoff :: Monad m => RetryPolicyM m
+limitedBackoff = exponentialBackoff 50000 <> limitRetries 10
+
+runInClient :: (MonadReader s m, MonadIO m) => Getting ClientEnv s ClientEnv -> ClientM b -> m (Either ClientError b)
+runInClient getEnv m = do
+  env <- view getEnv
+  retrying
+    limitedBackoff
+    (const $ return . isLeft)
+    \_ -> do
+      liftIO $ runClientM m env
+

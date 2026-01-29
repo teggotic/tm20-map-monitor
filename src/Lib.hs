@@ -4,14 +4,12 @@
 
 module Lib where
 
-import Control.Lens hiding (Context)
 import Data.Acid
 import Data.Acid.Remote (acidServer, openRemoteState, skipAuthenticationCheck, skipAuthenticationPerform)
 import Data.Default
 import Data.Either.Combinators
 import Dhall
 import MapMonitor.CachedAPIResponses
-import MapMonitor.Common
 import MapMonitor.DB
 import MapMonitor.Integrations
 import MapMonitor.Server
@@ -26,18 +24,19 @@ import qualified Prometheus as P
 import qualified Prometheus.Metric.GHC as P
 import Protolude hiding (atomically, bracket, forkIO, threadDelay, to, toList, try)
 import RIO (MonadUnliftIO, newTMVarIO)
-import qualified RIO.Text as Text
 import Servant.Auth.Server
 import Servant.Client
 import Servant.Server
 import UnliftIO.Concurrent (forkIO, threadDelay)
 import UnliftIO.Exception (bracket, tryAny)
 import UnliftIO.STM
+import System.Directory (doesFileExist)
 
 runInApp :: (MonadIO m) => TVar UnbeatenAtsResponse -> TVar RecentlyBeatenAtsResponse -> AcidState MapMonitorState -> ReaderT AppState m b -> m b
 runInApp unbeatenAtsCache beatenAtsCache acid m = do
   settings <- liftIO $ input auto "./settings.dhall"
-  jwtAccessKey <- liftIO $ readKey "/tmp/jwt-access-key.secret"
+  jwtAccessKey <- liftIO $
+    (doesFileExist "/tmp/jwt-access-key.secret") >>= Protolude.bool generateKey (readKey "/tmp/jwt-access-key.secret")
   manager' <-
     liftIO $
       NHC.newManager
@@ -109,6 +108,16 @@ runProd = do
       liftIO $ acidServer skipAuthenticationCheck 8082 acid
 
     _ <- forkIO do
+      forever do
+        threadDelay (24 * 60 * 60 * 1000000)
+
+        res <- tryAny do
+          recheckTmxForLatestMissingMaps 1000
+          refreshCaches
+        whenLeft res $ \err ->
+          putText $ "Exception happened: " <> show err
+
+    _ <- forkIO do
       forM_ [(0 :: Int), 20 ..] $ \i -> do
         res <- tryAny $ do
           pass
@@ -121,7 +130,7 @@ runProd = do
                 if i `mod` 60 == 0
                   then refreshRecentUnbeatenMaps
                   else pass
-          scanTmxMaps
+          recheckTmxForLatestMissingMaps 80
 
         whenLeft res $ \err ->
           putText $ "Exception happened: " <> show err

@@ -70,9 +70,11 @@ library
     , base >=4.7 && <5
     , cereal
     , clock
+    , conduit
     , containers
     , data-default
     , dhall
+    , directory
     , either
     , http-api-data
     , http-client
@@ -84,6 +86,7 @@ library
     , prometheus-client
     , prometheus-metrics-ghc
     , protolude
+    , retry
     , rio
     , safecopy
     , servant
@@ -133,9 +136,11 @@ executable map-monitor-exe
     , base >=4.7 && <5
     , cereal
     , clock
+    , conduit
     , containers
     , data-default
     , dhall
+    , directory
     , either
     , http-api-data
     , http-client
@@ -148,6 +153,7 @@ executable map-monitor-exe
     , prometheus-client
     , prometheus-metrics-ghc
     , protolude
+    , retry
     , rio
     , safecopy
     , servant
@@ -203,9 +209,11 @@ test-suite map-monitor-test
     , base >=4.7 && <5
     , cereal
     , clock
+    , conduit
     , containers
     , data-default
     , dhall
+    , directory
     , either
     , http-api-data
     , http-client
@@ -218,6 +226,7 @@ test-suite map-monitor-test
     , prometheus-client
     , prometheus-metrics-ghc
     , protolude
+    , retry
     , rio
     , safecopy
     , servant
