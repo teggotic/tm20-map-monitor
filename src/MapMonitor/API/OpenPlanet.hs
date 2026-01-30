@@ -3,10 +3,12 @@
 module MapMonitor.API.OpenPlanet (
   OpenPlanetAuthValidateResponse (..),
   OpenPlanetAuthValidateRequest (..),
+  HasOpenPlanetClient (..),
   openPlanetAuthValidate,
 )
 where
 
+import Control.Lens
 import Data.Aeson
 import Data.Aeson.TH
 import GHC.Exts (IsList (fromList))
@@ -15,6 +17,9 @@ import qualified RIO.Text as Text
 import Servant.API
 import Servant.Client
 import Web.FormUrlEncoded (ToForm (..))
+
+class HasOpenPlanetClient env where
+  openPlanetClientL :: Lens' env ClientEnv
 
 data OpenPlanetAuthValidateResponse
   = OpenPlanetAuthValidateResponse

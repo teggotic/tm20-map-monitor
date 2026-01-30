@@ -2,31 +2,134 @@
 
 module MapMonitor.API.Nadeo (
   GetMapLeaderboardTopEntry (..),
+  HasNadeoThrottler (..),
   GetMapLeaderboardTop (..),
   GetMapLeaderboardResponse (..),
   UTCTimestamp (..),
   GetMapMultipleResponseMap (..),
   GetMapMultipleResponse (..),
   IdsList (..),
-  NadeoTokenHeader (..),
+  HasNadeoTokenState (..),
+  HasNadeoCoreClient (..),
+  HasNadeoLiveClient (..),
+  NadeoTokenState (..),
   nadeoGetMapLeaderboard,
   nadeoGetMapMultiple,
   NadeoAuthTokenResponse (..),
   NadeoBasicAuthRequestBody (..),
+  HasNadeoRequestRate(..),
   authorizeNadeo,
-  refreshTokenNadeo,
 )
 where
 
+import Control.Lens
 import Data.Aeson
 import Data.Aeson.TH
-import Data.Time
+import RIO.Time
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
-import Protolude
-import RIO.Prelude.Types
+import Protolude hiding (threadDelay, atomically)
 import qualified RIO.Text as Text
 import Servant.API
 import Servant.Client
+import UnliftIO.STM
+import UnliftIO.Concurrent
+import MapMonitor.API.Util
+import MapMonitor.Common
+import Data.Fixed (Pico)
+
+data NadeoTokenState
+  = NadeoTokenState
+  { _nadeoTokenState_accessToken :: Text
+  , _nadeoTokenState_accessExpires :: UTCTime
+  , _nadeoTokenState_refreshToken :: Text
+  , _nadeoTokenState_refreshExpires :: UTCTime
+  }
+
+class HasNadeoRequestRate env where
+  nadeoRequestRateL :: Lens' env Pico
+
+class HasNadeoThrottler env where
+  nadeoThrottlerL :: Lens' env (TMVar UTCTime)
+
+withThrottler :: (MonadIO m, MonadReader env m, HasNadeoThrottler env, HasNadeoRequestRate env) => m a -> m a
+withThrottler action = do
+  throttler <- view nadeoThrottlerL
+  nextRequestAllowedAt <- atomically $ takeTMVar throttler
+  do
+    now <- getCurrentTime
+    when (now < nextRequestAllowedAt) do
+      threadDelay (floor $ (nominalDiffTimeToSeconds $ nextRequestAllowedAt `diffUTCTime` now) * 1000000)
+
+  res <- action
+
+  do
+    rate <- view nadeoRequestRateL
+    now <- getCurrentTime
+    atomically $ putTMVar throttler $ addUTCTime (secondsToNominalDiffTime $ rate) now
+
+  return res
+
+class HasNadeoTokenState env where
+  nadeoTokenStateL :: Lens' env (TMVar (Maybe NadeoTokenState))
+
+class HasNadeoCoreClient env where
+  nadeoCoreClientL :: Lens' env ClientEnv
+
+class HasNadeoLiveClient env where
+  nadeoLiveClientL :: Lens' env ClientEnv
+
+data NadeoAuthTokenResponse
+  = NadeoAuthTokenResponse
+  { _nadtr_accessToken :: Text
+  , _nadtr_refreshToken :: Text
+  }
+  deriving (Show)
+
+$(deriveJSON defaultOptions{fieldLabelModifier = drop (Text.length "_nadtr_")} ''NadeoAuthTokenResponse)
+
+type NadeoBasicAuth = Header' '[Required] "Authorization" Text
+
+data NadeoBasicAuthRequestBody
+  = NadeoBasicAuthRequestBody
+  { _nbarb_audience :: Text
+  }
+  deriving (Show)
+
+$(deriveJSON defaultOptions{fieldLabelModifier = drop (Text.length "_nbarb_")} ''NadeoBasicAuthRequestBody)
+
+data NadeoTokenHeader
+  = NadeoTokenHeader
+  { _nadth_token :: Text
+  }
+  deriving (Show)
+
+instance ToHttpApiData NadeoTokenHeader where
+  toUrlPiece tok = "nadeo_v1 t=" <> _nadth_token tok
+
+type NadeoTokenAuth = Header' '[Required] "Authorization" NadeoTokenHeader
+
+type CoreNadeoAPI =
+  "v2"
+    :> ( "authentication"
+           :> "token"
+           :> ( "basic" :> NadeoBasicAuth :> ReqBody '[JSON] NadeoBasicAuthRequestBody :> Post '[JSON] NadeoAuthTokenResponse
+                  :<|> "refresh" :> NadeoTokenAuth :> Post '[JSON] NadeoAuthTokenResponse
+              )
+       )
+
+coreNadeoAPI :: Proxy CoreNadeoAPI
+coreNadeoAPI = Proxy
+
+authorizeNadeo' :<|> refreshTokenNadeo' = client coreNadeoAPI
+
+authorizeNadeo :: (MonadIO m, MonadReader env m, HasNadeoCoreClient env, HasNadeoThrottler env, HasNadeoRequestRate env)
+               => Text
+               -> Text
+               -> m (Either ClientError NadeoAuthTokenResponse)
+authorizeNadeo auth scope = do
+  withThrottler do
+    runInClient nadeoCoreClientL $ authorizeNadeo' ("Basic " <> auth) (NadeoBasicAuthRequestBody scope)
+
 
 data GetMapLeaderboardTopEntry
   = GetMapLeaderboardTopEntry
@@ -96,17 +199,6 @@ data IdsList
 instance ToHttpApiData IdsList where
   toUrlPiece (IdsList ids) = Text.intercalate "," ids
 
-data NadeoTokenHeader
-  = NadeoTokenHeader
-  { _nadth_token :: Text
-  }
-  deriving (Show)
-
-instance ToHttpApiData NadeoTokenHeader where
-  toUrlPiece tok = "nadeo_v1 t=" <> _nadth_token tok
-
-type NadeoTokenAuth = Header' '[Required] "Authorization" NadeoTokenHeader
-
 type LiveServicesNadeoAPI =
   "api"
     :> "token"
@@ -127,42 +219,55 @@ type LiveServicesNadeoAPI =
              :> Get '[JSON] GetMapMultipleResponse
        )
 
+withAccessToken :: (MonadFail m, MonadIO m, HasNadeoTokenState env, MonadReader env m, HasAppSettings env, HasNadeoCoreClient env, HasNadeoThrottler env, HasNadeoRequestRate env) => (NadeoTokenHeader -> m a) -> m a
+withAccessToken m = do
+  tokenStateRef <- view nadeoTokenStateL
+  tokenStateM <- atomically $ takeTMVar tokenStateRef
+  tokState <- case tokenStateM of
+    Nothing -> do
+      Just tok <- newToken
+      return tok
+    Just tokenState -> do
+      now <- getCurrentTime
+      if _nadeoTokenState_accessExpires tokenState > (addUTCTime (secondsToNominalDiffTime 60) now)
+        then return tokenState
+        else do
+          Just tok <- newToken
+          return tok
+  atomically $ putTMVar tokenStateRef (Just tokState)
+  m (NadeoTokenHeader $ _nadeoTokenState_accessToken tokState)
+ where
+  newToken = do
+    settings <- view appSettingsL
+    accessTokenE <- authorizeNadeo (_settings_auth settings) "NadeoLiveServices"
+    case accessTokenE of
+      Left err -> do
+        putText $ "Error: " <> show err
+        return Nothing
+      Right resp -> do
+        now <- getCurrentTime
+        return $
+          Just $
+            NadeoTokenState
+              { _nadeoTokenState_accessToken = _nadtr_accessToken resp
+              , _nadeoTokenState_accessExpires = addUTCTime (secondsToNominalDiffTime $ 60 * 60) now
+              , _nadeoTokenState_refreshToken = _nadtr_refreshToken resp
+              , _nadeoTokenState_refreshExpires = addUTCTime (secondsToNominalDiffTime $ 24 * 60 * 60) now
+              }
+
 liveServicesNadeoAPI :: Proxy LiveServicesNadeoAPI
 liveServicesNadeoAPI = Proxy
 
-nadeoGetMapLeaderboard :: Text -> NadeoTokenHeader -> Int -> Text -> ClientM GetMapLeaderboardResponse
-nadeoGetMapMultiple :: NadeoTokenHeader -> IdsList -> ClientM GetMapMultipleResponse
-nadeoGetMapLeaderboard :<|> nadeoGetMapMultiple = client liveServicesNadeoAPI
+nadeoGetMapLeaderboard' :<|> nadeoGetMapMultiple' = client liveServicesNadeoAPI
 
-data NadeoAuthTokenResponse
-  = NadeoAuthTokenResponse
-  { _nadtr_accessToken :: Text
-  , _nadtr_refreshToken :: Text
-  }
-  deriving (Show)
+nadeoGetMapLeaderboard :: (MonadIO m, MonadReader s m, HasNadeoThrottler s,  HasNadeoRequestRate s, HasNadeoLiveClient s, MonadFail m, HasNadeoTokenState s, HasAppSettings s, HasNadeoCoreClient s) => Text -> Int -> m (Either ClientError GetMapLeaderboardResponse)
+nadeoGetMapLeaderboard mapUid count =
+  withAccessToken \accessToken -> do
+    withThrottler do
+      runInClient nadeoLiveClientL $ nadeoGetMapLeaderboard' mapUid accessToken count "true"
 
-$(deriveJSON defaultOptions{fieldLabelModifier = drop (Text.length "_nadtr_")} ''NadeoAuthTokenResponse)
-
-type NadeoBasicAuth = Header' '[Required] "Authorization" Text
-
-data NadeoBasicAuthRequestBody
-  = NadeoBasicAuthRequestBody
-  { _nbarb_audience :: Text
-  }
-  deriving (Show)
-
-$(deriveJSON defaultOptions{fieldLabelModifier = drop (Text.length "_nbarb_")} ''NadeoBasicAuthRequestBody)
-
-type CoreNadeoAPI =
-  "v2"
-    :> ( "authentication"
-           :> "token"
-           :> ( "basic" :> NadeoBasicAuth :> ReqBody '[JSON] NadeoBasicAuthRequestBody :> Post '[JSON] NadeoAuthTokenResponse
-                  :<|> "refresh" :> NadeoTokenAuth :> Post '[JSON] NadeoAuthTokenResponse
-              )
-       )
-
-coreNadeoAPI :: Proxy CoreNadeoAPI
-coreNadeoAPI = Proxy
-
-authorizeNadeo :<|> refreshTokenNadeo = client coreNadeoAPI
+nadeoGetMapMultiple :: (MonadIO m, MonadReader s m, HasNadeoThrottler s,  HasNadeoRequestRate s, HasNadeoLiveClient s, MonadFail m, HasNadeoTokenState s, HasAppSettings s, HasNadeoCoreClient s) => IdsList -> m (Either ClientError GetMapMultipleResponse)
+nadeoGetMapMultiple ids =
+  withAccessToken \accessToken -> do
+    withThrottler do
+      runInClient nadeoLiveClientL $ nadeoGetMapMultiple' accessToken ids

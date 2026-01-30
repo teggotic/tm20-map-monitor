@@ -2,6 +2,7 @@
 
 module MapMonitor.API.XertroV (
   XertrovMapMonitorNbPlayersResponse (..),
+  HasXertrovClient (..),
   xertrovGetNbPlayers,
 )
 where
@@ -12,6 +13,10 @@ import Protolude
 import qualified RIO.Text as Text
 import Servant.API
 import Servant.Client
+import Control.Lens
+
+class HasXertrovClient env where
+  xertrovClientL :: Lens' env ClientEnv
 
 data XertrovMapMonitorNbPlayersResponse
   = XertrovMapMonitorNbPlayersResponse

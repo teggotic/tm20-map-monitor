@@ -18,7 +18,7 @@ import MapMonitor.Integrations (addMissingMaps)
 import qualified Network.HTTP.Types as H
 import Network.Wai as Wai
 import Protolude hiding (atomically)
-import RIO (toStrictBytes)
+import RIO (toStrictBytes, HasLogFunc (..), LogFunc)
 import qualified RIO.Text as Text
 import RIO.Time
 import Servant
@@ -26,6 +26,11 @@ import Servant.Auth.Server
 import Servant.Client
 import Servant.Server
 import UnliftIO.STM
+import MapMonitor.API.Nadeo
+import MapMonitor.API.XertroV
+import MapMonitor.API.TMX
+import MapMonitor.API.Util
+import Data.Fixed
 
 data AppState
   = AppState
@@ -40,6 +45,9 @@ data AppState
   , _appState_nadeoToken :: TMVar (Maybe NadeoTokenState)
   , _appState_settings :: AppSettings
   , _appState_jwtSettings :: JWTSettings
+  , _appState_nadeoThrottler :: TMVar UTCTime
+  , _appState_nadeoRequestRate :: Pico
+  , _appState_logFunc :: LogFunc
   }
 
 $(makeLenses ''AppState)
@@ -76,6 +84,15 @@ instance HasUnbeatenAtsCache AppState where
 
 instance HasBeatenAtsCache AppState where
   beatenAtsCacheL = appState_beatenAtsCache
+
+instance HasNadeoThrottler AppState where
+  nadeoThrottlerL = appState_nadeoThrottler
+
+instance HasNadeoRequestRate AppState where
+  nadeoRequestRateL = appState_nadeoRequestRate
+
+instance HasLogFunc AppState where
+  logFuncL = appState_logFunc
 
 type AppM = ReaderT AppState Servant.Server.Handler
 

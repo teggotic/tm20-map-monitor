@@ -22,8 +22,8 @@ import Network.Wai.Middleware.Gzip (GzipFiles (GzipCompress), gzip, gzipFiles)
 import qualified Network.Wai.Middleware.Prometheus as P
 import qualified Prometheus as P
 import qualified Prometheus.Metric.GHC as P
-import Protolude hiding (atomically, bracket, forkIO, threadDelay, to, toList, try)
-import RIO (MonadUnliftIO, newTMVarIO)
+import Protolude hiding (withFile, atomically, bracket, forkIO, threadDelay, to, toList, try)
+import RIO (MonadUnliftIO, newTMVarIO, withLogFunc, setLogUseTime, logOptionsHandle, withFile, hSetBuffering, BufferMode (LineBuffering))
 import Servant.Auth.Server
 import Servant.Client
 import Servant.Server
@@ -31,8 +31,9 @@ import UnliftIO.Concurrent (forkIO, threadDelay)
 import UnliftIO.Exception (bracket, tryAny)
 import UnliftIO.STM
 import System.Directory (doesFileExist)
+import RIO.Time (getCurrentTime)
 
-runInApp :: (MonadIO m) => TVar UnbeatenAtsResponse -> TVar RecentlyBeatenAtsResponse -> AcidState MapMonitorState -> ReaderT AppState m b -> m b
+runInApp :: (MonadUnliftIO m) => TVar UnbeatenAtsResponse -> TVar RecentlyBeatenAtsResponse -> AcidState MapMonitorState -> ReaderT AppState m b -> m b
 runInApp unbeatenAtsCache beatenAtsCache acid m = do
   settings <- liftIO $ input auto "./settings.dhall"
   jwtAccessKey <- liftIO $
@@ -53,24 +54,34 @@ runInApp unbeatenAtsCache beatenAtsCache acid m = do
     _mockClient = (mkClientEnv manager' (BaseUrl Http "localhost" 7249 ""))
     jwtSettings = defaultJWTSettings jwtAccessKey
 
-  tokenStateRef <- RIO.newTMVarIO Nothing
-  let appState =
-        AppState
-          { _appState_acid = acid
-          , _appState_unbeatenAtsCache = unbeatenAtsCache
-          , _appState_beatenAtsCache = beatenAtsCache
-          , _appState_coreNadeoClient = coreNadeoClient
-          , _appState_liveServicesNadeoClient = liveServicesNadeoClient
-          , _appState_tmxClient = tmxClient
-          , _appState_xertrovClient = xertrovClient
-          , _appState_openPlanetClient = openPlanetClient
-          , _appState_nadeoToken = tokenStateRef
-          , _appState_settings = settings
-          , _appState_jwtSettings = jwtSettings
-          }
-  runReaderT m appState
+  throttler <- newTMVarIO =<< getCurrentTime
 
-runTemporary :: (MonadIO m) => AcidState MapMonitorState -> ReaderT AppState m b -> m b
+  tokenStateRef <- RIO.newTMVarIO Nothing
+  withFile "/tmp/tm20-map-monitor.log" AppendMode $ \h -> do
+    hSetBuffering h LineBuffering
+    logOptions' <- logOptionsHandle h False
+    let logOptions = setLogUseTime True logOptions'
+    withLogFunc logOptions $ \logFunc -> do
+      let appState =
+            AppState
+              { _appState_acid = acid
+              , _appState_unbeatenAtsCache = unbeatenAtsCache
+              , _appState_beatenAtsCache = beatenAtsCache
+              , _appState_coreNadeoClient = coreNadeoClient
+              , _appState_liveServicesNadeoClient = liveServicesNadeoClient
+              , _appState_tmxClient = tmxClient
+              , _appState_xertrovClient = xertrovClient
+              , _appState_openPlanetClient = openPlanetClient
+              , _appState_nadeoToken = tokenStateRef
+              , _appState_settings = settings
+              , _appState_jwtSettings = jwtSettings
+              , _appState_nadeoThrottler = throttler
+              , _appState_nadeoRequestRate = 1
+              , _appState_logFunc = logFunc
+              }
+      runReaderT m appState
+
+runTemporary :: ( MonadUnliftIO m) =>AcidState MapMonitorState -> ReaderT AppState m b -> m b
 runTemporary acid m = do
   unbeatenAtsCache <- flip runReaderT acid $ do
     collectUnbeatenAtsResponse >>= liftIO . newTVarIO
@@ -104,52 +115,56 @@ runProd = do
     collectBeatenAtsResponse >>= liftIO . newTVarIO
 
   runInApp unbeatenAtsCache beatenAtsCache acid $ do
-    _ <- forkIO $ do
-      liftIO $ acidServer skipAuthenticationCheck 8082 acid
+    fullRescan 285556
+    -- _ <- forkIO $ do
+    --   liftIO $ acidServer skipAuthenticationCheck 8082 acid
+    --
 
-    _ <- forkIO do
-      forever do
-        threadDelay (24 * 60 * 60 * 1000000)
+    
 
-        res <- tryAny do
-          recheckTmxForLatestMissingMaps 1000
-          refreshCaches
-        whenLeft res $ \err ->
-          putText $ "Exception happened: " <> show err
-
-    _ <- forkIO do
-      forM_ [(0 :: Int), 20 ..] $ \i -> do
-        res <- tryAny $ do
-          pass
-          refreshMissingInfo
-
-          when (i /= 0) do
-            if i `mod` 180 == 0
-              then refreshUnbeatenMaps
-              else
-                if i `mod` 60 == 0
-                  then refreshRecentUnbeatenMaps
-                  else pass
-          recheckTmxForLatestMissingMaps 80
-
-        whenLeft res $ \err ->
-          putText $ "Exception happened: " <> show err
-
-        refreshCaches
-        threadDelay (20 * 60 * 1000 * 1000)
-
-    st <- ask
-    let
-      settings =
-        setPort 8081 $
-          defaultSettings
-      cookieCfg = defaultCookieSettings
-      cfg = cookieCfg :. (_appState_jwtSettings st) :. EmptyContext
-
-    _ <- P.register P.ghcMetrics
-
-    liftIO $
-      runSettings settings $
-        gzip (def{gzipFiles = GzipCompress}) $
-          P.prometheus P.def $
-            app cfg st
+    -- _ <- forkIO do
+    --   forever do
+    --     threadDelay (24 * 60 * 60 * 1000000)
+    --
+    --     res <- tryAny do
+    --       recheckTmxForLatestMissingMaps 1000
+    --       refreshCaches
+    --     whenLeft res $ \err ->
+    --       putText $ "Exception happened: " <> show err
+    --
+    -- _ <- forkIO do
+    --   forM_ [(0 :: Int), 20 ..] $ \i -> do
+    --     res <- tryAny $ do
+    --       pass
+    --       refreshMissingInfo
+    --
+    --       when (i /= 0) do
+    --         if i `mod` 180 == 0
+    --           then refreshUnbeatenMaps
+    --           else
+    --             if i `mod` 60 == 0
+    --               then refreshRecentUnbeatenMaps
+    --               else pass
+    --       recheckTmxForLatestMissingMaps 80
+    --
+    --     whenLeft res $ \err ->
+    --       putText $ "Exception happened: " <> show err
+    --
+    --     refreshCaches
+    --     threadDelay (20 * 60 * 1000 * 1000)
+    --
+    -- st <- ask
+    -- let
+    --   settings =
+    --     setPort 8081 $
+    --       defaultSettings
+    --   cookieCfg = defaultCookieSettings
+    --   cfg = cookieCfg :. (_appState_jwtSettings st) :. EmptyContext
+    --
+    -- _ <- P.register P.ghcMetrics
+    --
+    -- liftIO $
+    --   runSettings settings $
+    --     gzip (def{gzipFiles = GzipCompress}) $
+    --       P.prometheus P.def $
+    --         app cfg st

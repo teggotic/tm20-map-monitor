@@ -7,6 +7,7 @@ module MapMonitor.API.TMX (
   TMXSearchMapsMap (..),
   TMXSearchMapsResponse (..),
   TMXSearchMaps (..),
+  HasTMXClient (..),
   tmxSearchMaps,
   tmxMapToTMMap,
 )
@@ -19,6 +20,10 @@ import Protolude
 import qualified RIO.Text as Text
 import Servant.API
 import Servant.Client
+import Control.Lens
+
+class HasTMXClient env where
+  tmxClientL :: Lens' env ClientEnv
 
 data TMXSearchMapsFields
   = TMXSearchMapsFields [Text]

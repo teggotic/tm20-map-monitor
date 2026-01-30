@@ -35,12 +35,14 @@ library
       MapMonitor.API.Nadeo
       MapMonitor.API.OpenPlanet
       MapMonitor.API.TMX
+      MapMonitor.API.Util
       MapMonitor.API.XertroV
       MapMonitor.ATCheck
       MapMonitor.CachedAPIResponses
       MapMonitor.Common
       MapMonitor.DB
       MapMonitor.Integrations
+      MapMonitor.MapCache
       MapMonitor.Server
   other-modules:
       Paths_map_monitor

@@ -23,6 +23,7 @@ module MapMonitor.DB (
   applyPatch,
   defPatch,
   updateMaps,
+  isMapUnbeaten,
 )
 where
 
@@ -285,13 +286,17 @@ replaceMap :: TMMap -> Update MapMonitorState ()
 replaceMap tmMap = do
   modify $ \s -> s{mms_ubeatenMaps = Map.insert (_tmm_tmxId tmMap) tmMap $ mms_ubeatenMaps s}
 
+isMapUnbeaten :: TMMap -> Bool
+isMapUnbeaten tmMap =
+  maybe True (\wr -> _tmmr_time wr > _tmm_authorMedal tmMap) (_tmm_currentWR tmMap)
+
 shuffleBeatenMaps :: Update MapMonitorState ()
 shuffleBeatenMaps = do
   st <- get
   let
     (unbeaten, beaten) =
       Map.partition
-        (\tmmap -> case _tmm_currentWR tmmap of Nothing -> True; Just wr -> _tmmr_time wr > _tmm_authorMedal tmmap)
+        isMapUnbeaten
         (mms_ubeatenMaps st)
   put $
     MapMonitorState
