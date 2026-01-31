@@ -57,7 +57,9 @@ runInApp unbeatenAtsCache beatenAtsCache acid m = do
   throttler <- newTMVarIO =<< getCurrentTime
 
   tokenStateRef <- RIO.newTMVarIO Nothing
-  withFile "/tmp/tm20-map-monitor.log" AppendMode $ \h -> do
+  -- withFile "/tmp/tm20-map-monitor.log" AppendMode $ \h -> do
+  let h = stderr
+  do
     hSetBuffering h LineBuffering
     logOptions' <- logOptionsHandle h False
     let logOptions = setLogUseTime True logOptions'
@@ -114,8 +116,14 @@ runProd = do
   beatenAtsCache <- flip runReaderT acid $ do
     collectBeatenAtsResponse >>= liftIO . newTVarIO
 
+  checkAtQueue <- newTQueueIO
+
   runInApp unbeatenAtsCache beatenAtsCache acid $ do
-    fullRescan 285556
+    _ <- forkIO $ forever do
+      processAtCheckQueue checkAtQueue
+
+    fullRescan checkAtQueue
+
     -- _ <- forkIO $ do
     --   liftIO $ acidServer skipAuthenticationCheck 8082 acid
     --

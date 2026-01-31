@@ -62,6 +62,7 @@ dependencies:
 - retry
 - conduit
 - directory
+- stm-conduit
 
 default-extensions:
 - LambdaCase

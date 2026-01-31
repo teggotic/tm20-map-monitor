@@ -97,6 +97,7 @@ library
     , servant-client
     , servant-server
     , stm
+    , stm-conduit
     , temporary
     , time
     , typed-process
@@ -164,6 +165,7 @@ executable map-monitor-exe
     , servant-client
     , servant-server
     , stm
+    , stm-conduit
     , temporary
     , time
     , typed-process
@@ -237,6 +239,7 @@ test-suite map-monitor-test
     , servant-client
     , servant-server
     , stm
+    , stm-conduit
     , temporary
     , time
     , typed-process

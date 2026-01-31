@@ -22,6 +22,7 @@ module MapMonitor.DB (
   reportMap,
   applyPatch,
   defPatch,
+  patchIsEmpty,
   updateMaps,
   isMapUnbeaten,
 )
