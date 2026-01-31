@@ -54,34 +54,39 @@ runInApp unbeatenAtsCache beatenAtsCache acid m = do
     _mockClient = (mkClientEnv manager' (BaseUrl Http "localhost" 7249 ""))
     jwtSettings = defaultJWTSettings jwtAccessKey
 
-  throttler <- newTMVarIO =<< getCurrentTime
+  let
+    go h = do
+      throttler <- newTMVarIO =<< getCurrentTime
+      tokenStateRef <- RIO.newTMVarIO Nothing
 
-  tokenStateRef <- RIO.newTMVarIO Nothing
-  -- withFile "/tmp/tm20-map-monitor.log" AppendMode $ \h -> do
-  let h = stderr
-  do
-    hSetBuffering h LineBuffering
-    logOptions' <- logOptionsHandle h False
-    let logOptions = setLogUseTime True logOptions'
-    withLogFunc logOptions $ \logFunc -> do
-      let appState =
-            AppState
-              { _appState_acid = acid
-              , _appState_unbeatenAtsCache = unbeatenAtsCache
-              , _appState_beatenAtsCache = beatenAtsCache
-              , _appState_coreNadeoClient = coreNadeoClient
-              , _appState_liveServicesNadeoClient = liveServicesNadeoClient
-              , _appState_tmxClient = tmxClient
-              , _appState_xertrovClient = xertrovClient
-              , _appState_openPlanetClient = openPlanetClient
-              , _appState_nadeoToken = tokenStateRef
-              , _appState_settings = settings
-              , _appState_jwtSettings = jwtSettings
-              , _appState_nadeoThrottler = throttler
-              , _appState_nadeoRequestRate = 1
-              , _appState_logFunc = logFunc
-              }
-      runReaderT m appState
+      logOptions' <- logOptionsHandle h False
+      let logOptions = setLogUseTime True logOptions'
+      withLogFunc logOptions $ \logFunc -> do
+        let appState =
+              AppState
+                { _appState_acid = acid
+                , _appState_unbeatenAtsCache = unbeatenAtsCache
+                , _appState_beatenAtsCache = beatenAtsCache
+                , _appState_coreNadeoClient = coreNadeoClient
+                , _appState_liveServicesNadeoClient = liveServicesNadeoClient
+                , _appState_tmxClient = tmxClient
+                , _appState_xertrovClient = xertrovClient
+                , _appState_openPlanetClient = openPlanetClient
+                , _appState_nadeoToken = tokenStateRef
+                , _appState_settings = settings
+                , _appState_jwtSettings = jwtSettings
+                , _appState_nadeoThrottler = throttler
+                , _appState_nadeoRequestRate = 1
+                , _appState_logFunc = logFunc
+                }
+        runReaderT m appState
+
+  case _settings_logFile settings of
+    Nothing -> go stderr
+    Just logFile -> do
+      withFile logFile AppendMode $ \h -> do
+        hSetBuffering h LineBuffering
+        go h
 
 runTemporary :: ( MonadUnliftIO m) =>AcidState MapMonitorState -> ReaderT AppState m b -> m b
 runTemporary acid m = do

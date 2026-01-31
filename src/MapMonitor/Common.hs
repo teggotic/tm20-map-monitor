@@ -30,6 +30,7 @@ data AppSettings
   { _settings_auth :: Text
   , _settings_openplanetAuthSecret :: Text
   , _settings_mapsCacheDirectory :: Maybe FilePath
+  , _settings_logFile :: Maybe FilePath
   }
   deriving (Generic, Show)
 
