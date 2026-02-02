@@ -13,6 +13,7 @@ import MapMonitor.CachedAPIResponses
 import MapMonitor.DB
 import MapMonitor.Integrations
 import MapMonitor.Server
+import MapMonitor.Common
 import Network.HTTP.Client as NHC (ManagerSettings (managerModifyRequest), Request (requestHeaders), newManager)
 import Network.HTTP.Client.TLS
 import Network.HTTP.Types.Header (hUserAgent)
