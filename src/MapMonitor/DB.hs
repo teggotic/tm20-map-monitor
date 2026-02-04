@@ -19,6 +19,7 @@ module MapMonitor.DB (
   GetMapMonitorState (..),
   HideMap (..),
   SetAtSetByPlugin (..),
+  RemoveMap (..),
   reportMap,
   applyPatch,
   defPatch,
@@ -278,6 +279,10 @@ updateMaps' patches = do
             patches
       }
 
+removeMap :: TMXId -> Update MapMonitorState ()
+removeMap tmxId = do
+  modify $ \s -> s{mms_ubeatenMaps = Map.delete tmxId $ mms_ubeatenMaps s}
+
 replaceMaps :: [TMMap] -> Update MapMonitorState ()
 replaceMaps mps = do
   let maps = fromList (zip (_tmm_tmxId <$> mps) mps)
@@ -328,7 +333,7 @@ setAtSetByPlugin :: TMXId -> Maybe Bool -> Update MapMonitorState ()
 setAtSetByPlugin tmxId atSetByPlugin = do
   modify $ \s -> s{mms_ubeatenMaps = Map.adjust (\tmmap -> tmmap{_tmm_atSetByPlugin = atSetByPlugin}) tmxId $ mms_ubeatenMaps s}
 
-$(makeAcidic ''MapMonitorState ['updateMaps', 'replaceMap, 'replaceMaps, 'addNewMaps, 'getMaps, 'getBeatenMaps, 'shuffleBeatenMaps, 'getMapMonitorState, 'hideMap, 'setAtSetByPlugin, 'getMapsByIds])
+$(makeAcidic ''MapMonitorState ['updateMaps', 'replaceMap, 'replaceMaps, 'addNewMaps, 'getMaps, 'getBeatenMaps, 'shuffleBeatenMaps, 'getMapMonitorState, 'hideMap, 'setAtSetByPlugin, 'getMapsByIds, 'removeMap])
 
 updateMaps :: (MonadIO m) => AcidState MapMonitorState -> [TMMapPatch] -> m [TMMap]
 updateMaps acid patches = do
