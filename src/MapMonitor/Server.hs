@@ -233,7 +233,7 @@ collectUnbeatenAtsResponse = do
   allMaps <- queryAcid GetMaps
   let
     unbeatenMaps =
-      flip fmap (filter (\tmmap -> isJust (_tmm_authorUid tmmap)) allMaps) $ \tmmap ->
+      flip fmap (filter (\tmmap -> isJust (_tmm_authorUid tmmap) && maybe True (== MT_Race) (_tmm_mapType tmmap)) allMaps) $ \tmmap ->
         ( _tmm_tmxId tmmap
         , _tmm_uid tmmap
         , _tmm_name tmmap

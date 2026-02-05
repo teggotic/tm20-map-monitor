@@ -6,6 +6,7 @@
 
 module MapMonitor.DB (
   TMMap (..),
+  TMXMapType (..),
   TMMapPatch (..),
   TMXId (..),
   TMMapRecord (..),
@@ -108,6 +109,55 @@ instance Migrate TMMap_v5 where
 
 $(deriveSafeCopy 5 'extension ''TMMap_v5)
 
+data TMMap_v6
+  = TMMap_v6
+  { v6_tmm_tmxId :: TMXId
+  , v6_tmm_uid :: Text
+  , v6_tmm_name :: Text
+  , v6_tmm_authorMedal :: Int
+  , v6_tmm_authorUid :: (Maybe Text)
+  , v6_tmm_tags :: [Int]
+  , v6_tmm_currentWR :: (Maybe TMMapRecord)
+  , v6_tmm_uploadedAt :: (Maybe UTCTime)
+  , v6_tmm_hiddenReason :: (Maybe Text)
+  , v6_tmm_atSetByPlugin :: (Maybe Bool)
+  , v6_tmm_nbPlayers :: (Maybe Int)
+  , v6_tmm_reportedBy :: Map Text (UTCTime, Text)
+  }
+  deriving (Generic, Show)
+
+instance Migrate TMMap_v6 where
+  type MigrateFrom TMMap_v6 = TMMap_v5
+  migrate (TMMap_v5 tmxId uid name authorMedal authorUid tags currentWR uploadedAt hiddenReason atSetByPlugin nbPlayers) =
+    TMMap_v6
+      { v6_tmm_tmxId = tmxId
+      , v6_tmm_uid = uid
+      , v6_tmm_name = name
+      , v6_tmm_authorMedal = authorMedal
+      , v6_tmm_authorUid = authorUid
+      , v6_tmm_tags = tags
+      , v6_tmm_currentWR = currentWR
+      , v6_tmm_uploadedAt = uploadedAt
+      , v6_tmm_hiddenReason = hiddenReason
+      , v6_tmm_atSetByPlugin = atSetByPlugin
+      , v6_tmm_nbPlayers = nbPlayers
+      , v6_tmm_reportedBy = mempty
+      }
+
+$(deriveSafeCopy 6 'extension ''TMMap_v6)
+
+
+data TMXMapType
+  = MT_Race
+  | MT_Royal
+  | MT_Stunt
+  | MT_Platform
+  | MT_Puzzle
+  | MT_Other Text
+  deriving (Show, Eq, Ord, Generic)
+
+$(deriveSafeCopy 0 'base ''TMXMapType)
+
 data TMMap
   = TMMap
   { _tmm_tmxId :: TMXId
@@ -122,12 +172,13 @@ data TMMap
   , _tmm_atSetByPlugin :: (Maybe Bool)
   , _tmm_nbPlayers :: (Maybe Int)
   , _tmm_reportedBy :: Map Text (UTCTime, Text)
+  , _tmm_mapType :: Maybe TMXMapType
   }
   deriving (Generic, Show)
 
 instance Migrate TMMap where
-  type MigrateFrom TMMap = TMMap_v5
-  migrate (TMMap_v5 tmxId uid name authorMedal authorUid tags currentWR uploadedAt hiddenReason atSetByPlugin nbPlayers) =
+  type MigrateFrom TMMap = TMMap_v6
+  migrate (TMMap_v6 tmxId uid name authorMedal authorUid tags currentWR uploadedAt hiddenReason atSetByPlugin nbPlayers reportedBy) =
     TMMap
       { _tmm_tmxId = tmxId
       , _tmm_uid = uid
@@ -140,10 +191,11 @@ instance Migrate TMMap where
       , _tmm_hiddenReason = hiddenReason
       , _tmm_atSetByPlugin = atSetByPlugin
       , _tmm_nbPlayers = nbPlayers
-      , _tmm_reportedBy = mempty
+      , _tmm_reportedBy = reportedBy
+      , _tmm_mapType = Nothing
       }
 
-$(deriveSafeCopy 6 'extension ''TMMap)
+$(deriveSafeCopy 7 'extension ''TMMap)
 
 data TMMapPatch_v0
   = TMMapPatch_v0
@@ -163,6 +215,43 @@ data TMMapPatch_v0
 
 $(deriveSafeCopy 0 'base ''TMMapPatch_v0)
 
+data TMMapPatch_v1
+  = TMMapPatch_v1
+  { v1_tmmp_tmxId :: TMXId
+  , v1_tmmp_uid :: Maybe Text
+  , v1_tmmp_name :: Maybe Text
+  , v1_tmmp_authorMedal :: Maybe Int
+  , v1_tmmp_authorUid :: Maybe (Maybe Text)
+  , v1_tmmp_tags :: Maybe [Int]
+  , v1_tmmp_currentWR :: Maybe (Maybe TMMapRecord)
+  , v1_tmmp_uploadedAt :: Maybe (Maybe UTCTime)
+  , v1_tmmp_hiddenReason :: Maybe (Maybe Text)
+  , v1_tmmp_atSetByPlugin :: Maybe (Maybe Bool)
+  , v1_tmmp_nbPlayers :: Maybe (Maybe Int)
+  , v1_tmmp_reportedBy :: Maybe (Map Text (Maybe (UTCTime, Text)))
+  }
+  deriving (Show)
+
+instance Migrate TMMapPatch_v1 where
+  type MigrateFrom TMMapPatch_v1 = TMMapPatch_v0
+  migrate (TMMapPatch_v0 tmxId uid name authorMedal authorUid tags currentWR uploadedAt hiddenReason atSetByPlugin nbPlayers) =
+    TMMapPatch_v1
+      { v1_tmmp_tmxId = tmxId
+      , v1_tmmp_uid = uid
+      , v1_tmmp_name = name
+      , v1_tmmp_authorMedal = authorMedal
+      , v1_tmmp_authorUid = authorUid
+      , v1_tmmp_tags = tags
+      , v1_tmmp_currentWR = currentWR
+      , v1_tmmp_uploadedAt = uploadedAt
+      , v1_tmmp_hiddenReason = hiddenReason
+      , v1_tmmp_atSetByPlugin = atSetByPlugin
+      , v1_tmmp_nbPlayers = nbPlayers
+      , v1_tmmp_reportedBy = Nothing
+      }
+
+$(deriveSafeCopy 1 'extension ''TMMapPatch_v1)
+
 data TMMapPatch
   = TMMapPatch
   { _tmmp_tmxId :: TMXId
@@ -177,12 +266,13 @@ data TMMapPatch
   , _tmmp_atSetByPlugin :: Maybe (Maybe Bool)
   , _tmmp_nbPlayers :: Maybe (Maybe Int)
   , _tmmp_reportedBy :: Maybe (Map Text (Maybe (UTCTime, Text)))
+  , _tmmp_mapType :: Maybe (Maybe TMXMapType)
   }
   deriving (Show)
 
 instance Migrate TMMapPatch where
-  type MigrateFrom TMMapPatch = TMMapPatch_v0
-  migrate (TMMapPatch_v0 tmxId uid name authorMedal authorUid tags currentWR uploadedAt hiddenReason atSetByPlugin nbPlayers) =
+  type MigrateFrom TMMapPatch = TMMapPatch_v1
+  migrate (TMMapPatch_v1 tmxId uid name authorMedal authorUid tags currentWR uploadedAt hiddenReason atSetByPlugin nbPlayers reportedBy) =
     TMMapPatch
       { _tmmp_tmxId = tmxId
       , _tmmp_uid = uid
@@ -195,13 +285,14 @@ instance Migrate TMMapPatch where
       , _tmmp_hiddenReason = hiddenReason
       , _tmmp_atSetByPlugin = atSetByPlugin
       , _tmmp_nbPlayers = nbPlayers
-      , _tmmp_reportedBy = Nothing
+      , _tmmp_reportedBy = reportedBy
+      , _tmmp_mapType = Nothing
       }
 
-$(deriveSafeCopy 1 'extension ''TMMapPatch)
+$(deriveSafeCopy 2 'extension ''TMMapPatch)
 
 defPatch :: TMXId -> TMMapPatch
-defPatch idx = TMMapPatch idx Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+defPatch idx = TMMapPatch idx Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
 
 patchIsEmpty :: TMMapPatch -> Bool
 patchIsEmpty patch =
@@ -221,8 +312,9 @@ patchIsEmpty patch =
 
 applyPatch :: TMMapPatch -> TMMap -> TMMap
 applyPatch patch tmMap =
-  tmMap
-    { _tmm_uid = fromMaybe (_tmm_uid tmMap) (_tmmp_uid patch)
+  TMMap
+    { _tmm_tmxId = _tmmp_tmxId patch
+    , _tmm_uid = fromMaybe (_tmm_uid tmMap) (_tmmp_uid patch)
     , _tmm_name = fromMaybe (_tmm_name tmMap) (_tmmp_name patch)
     , _tmm_authorMedal = fromMaybe (_tmm_authorMedal tmMap) (_tmmp_authorMedal patch)
     , _tmm_authorUid = fromMaybe (_tmm_authorUid tmMap) (_tmmp_authorUid patch)
@@ -235,6 +327,7 @@ applyPatch patch tmMap =
     , _tmm_reportedBy = case _tmmp_reportedBy patch of
         Nothing -> _tmm_reportedBy tmMap
         Just updates -> foldl' (\acc (k, val) -> Map.alter (const val) k acc) (_tmm_reportedBy tmMap) (Map.assocs updates)
+    , _tmm_mapType = fromMaybe (_tmm_mapType tmMap) (_tmmp_mapType patch)
     }
 
 data MapMonitorState_v1

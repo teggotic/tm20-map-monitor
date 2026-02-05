@@ -122,6 +122,21 @@ chunked :: Int -> [a] -> [[a]]
 chunked _ [] = []
 chunked n xs = take n xs : chunked n (drop n xs)
 
+pullKnownMapsC :: (MonadReader env m, HasTMXClient env, HasLogFunc env, MonadIO m  ) => ConduitT TMXId [TMMap] m ()
+pullKnownMapsC = do
+  chunkedC 100
+    .| mapMC \ids -> do
+      putText $ "Pulling info for maps " <> show (minimum ids) <> "-" <> show (maximum ids)
+      threadDelay (1000 * 1000)
+      runInClient tmxClientL (tmxSearchMaps TMXSearchMaps{_tmxsm_ids = (unTMXId <$> ids), _tmxsm_count = Just 100, _tmxsm_after = Nothing, _tmxsm_from = Nothing, _tmxsm_order1 = Nothing})
+        >>= \case
+          Left err -> do
+            logError $ "Error: " <> displayShow err
+            return []
+          Right res -> do
+            logInfo $ "Got " <> displayShow (length $ _tmxsr_Results res) <> " maps"
+            return $ tmxMapToTMMap <$> _tmxsr_Results res
+
 pullKnownMaps :: [Int] -> ClientM [TMXSearchMapsMap]
 pullKnownMaps [] = return []
 pullKnownMaps frm = do
@@ -208,6 +223,7 @@ getAllKnownIds = do
 collectUnknownMaps :: (MonadReader env m, HasState env, HasNadeoLiveClient env, MonadFail m, HasNadeoTokenState env, HasAppSettings env, HasNadeoCoreClient env, MonadUnliftIO m, HasNadeoRequestRate env, HasNadeoThrottler env, HasLogFunc env) => [TMMap] -> m ()
 collectUnknownMaps [] = pass
 collectUnknownMaps newMaps = do
+  putText $ "Adding new maps: " <> show (length newMaps)
   updateAcid (AddNewMaps (zip (_tmm_tmxId <$> newMaps) newMaps))
 
   mapsWithUserInfo <- withAcid1 updateMaps =<< loadNadeoMapsInfo newMaps
@@ -221,7 +237,7 @@ collectUnknownMaps newMaps = do
       withAcid1 updateMaps
         =<< flip (pooledMapConcurrentlyN 2) (zip [(1::Int)..] unbeatenMaps) \(i, tmmap) -> do
           atSetByPlugin <- checkAtSetByPlugin (unTMXId $ _tmm_tmxId tmmap)
-          logInfo $ "Checking AT set by plugin for map #" <> displayShow (unTMXId $ _tmm_tmxId tmmap) <> "(" <> displayShow i <> "/" <> displayShow (length mapsWithUserInfo) <> "): " <> displayShow atSetByPlugin
+          logInfo $ "Checking AT set by plugin for map #" <> displayShow (unTMXId $ _tmm_tmxId tmmap) <> "(" <> displayShow i <> "/" <> displayShow (length unbeatenMaps) <> "): " <> displayShow atSetByPlugin
           return $ (defPatch $ _tmm_tmxId tmmap){_tmmp_atSetByPlugin = Just atSetByPlugin}
 
   refreshBeatenMaps

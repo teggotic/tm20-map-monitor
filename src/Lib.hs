@@ -11,6 +11,7 @@ import Data.Either.Combinators
 import Dhall
 import MapMonitor.CachedAPIResponses
 import MapMonitor.DB
+import MapMonitor.Common
 import MapMonitor.Integrations
 import MapMonitor.Server
 import MapMonitor.Common
@@ -122,63 +123,58 @@ runProd = do
   beatenAtsCache <- flip runReaderT acid $ do
     collectBeatenAtsResponse >>= liftIO . newTVarIO
 
-  checkAtQueue <- newTQueueIO
-
+  -- checkAtQueue <- newTQueueIO
+  --
   runInApp unbeatenAtsCache beatenAtsCache acid $ do
-    _ <- forkIO $ forever do
-      processAtCheckQueue checkAtQueue
+    -- _ <- forkIO $ forever do
+    --   processAtCheckQueue checkAtQueue
+    _ <- forkIO $ do
+      liftIO $ acidServer skipAuthenticationCheck 8082 acid
 
-    fullRescan checkAtQueue
+    _ <- forkIO do
+      forever do
+        res <- tryAny do
+          refreshCaches
+        whenLeft res $ \err ->
+          putText $ "Exception happened: " <> show err
 
-    -- _ <- forkIO $ do
-    --   liftIO $ acidServer skipAuthenticationCheck 8082 acid
-    --
+        threadDelay (24 * 60 * 60 * 1000000)
 
-    
+    _ <- forkIO do
+      forM_ [(0 :: Int), 20 ..] $ \i -> do
+        res <- tryAny $ do
+          pass
+          refreshMissingInfo
 
-    -- _ <- forkIO do
-    --   forever do
-    --     threadDelay (24 * 60 * 60 * 1000000)
-    --
-    --     res <- tryAny do
-    --       recheckTmxForLatestMissingMaps 1000
-    --       refreshCaches
-    --     whenLeft res $ \err ->
-    --       putText $ "Exception happened: " <> show err
-    --
-    -- _ <- forkIO do
-    --   forM_ [(0 :: Int), 20 ..] $ \i -> do
-    --     res <- tryAny $ do
-    --       pass
-    --       refreshMissingInfo
-    --
-    --       when (i /= 0) do
-    --         if i `mod` 180 == 0
-    --           then refreshUnbeatenMaps
-    --           else
-    --             if i `mod` 60 == 0
-    --               then refreshRecentUnbeatenMaps
-    --               else pass
-    --       recheckTmxForLatestMissingMaps 80
-    --
-    --     whenLeft res $ \err ->
-    --       putText $ "Exception happened: " <> show err
-    --
-    --     refreshCaches
-    --     threadDelay (20 * 60 * 1000 * 1000)
-    --
-    -- st <- ask
-    -- let
-    --   settings =
-    --     setPort 8081 $
-    --       defaultSettings
-    --   cookieCfg = defaultCookieSettings
-    --   cfg = cookieCfg :. (_appState_jwtSettings st) :. EmptyContext
-    --
-    -- _ <- P.register P.ghcMetrics
-    --
-    -- liftIO $
-    --   runSettings settings $
-    --     gzip (def{gzipFiles = GzipCompress}) $
-    --       P.prometheus P.def $
-    --         app cfg st
+          when (i /= 0) do
+            if i `mod` 180 == 0
+              then refreshUnbeatenMaps
+              else
+                if i `mod` 60 == 0
+                  then refreshRecentUnbeatenMaps
+                  else pass
+          if i `mod` 24 * 60 == 0
+             then Protolude.void $ recheckTmxForLatestMissingMaps 1000
+             else Protolude.void $ recheckTmxForLatestMissingMaps 80
+
+        whenLeft res $ \err ->
+          putText $ "Exception happened: " <> show err
+
+        refreshCaches
+        threadDelay (20 * 60 * 1000 * 1000)
+
+    st <- ask
+    let
+      settings =
+        setPort 8081 $
+          defaultSettings
+      cookieCfg = defaultCookieSettings
+      cfg = cookieCfg :. (_appState_jwtSettings st) :. EmptyContext
+
+    _ <- P.register P.ghcMetrics
+
+    liftIO $
+      runSettings settings $
+        gzip (def{gzipFiles = GzipCompress}) $
+          P.prometheus P.def $
+            app cfg st

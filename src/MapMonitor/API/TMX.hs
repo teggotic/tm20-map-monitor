@@ -57,6 +57,7 @@ data TMXSearchMapsMap
   , _tmxsm_Name :: Text
   , _tmxsm_Medals :: TMXSearchMapsMedals
   , _tmxsm_Tags :: [TMXSearchMapsTag]
+  , _tmxsm_MapType :: Text
   }
   deriving (Show)
 
@@ -103,10 +104,17 @@ tmxMapToTMMap tmx =
     , _tmm_atSetByPlugin = Nothing
     , _tmm_nbPlayers = Nothing
     , _tmm_reportedBy = mempty
+    , _tmm_mapType = case _tmxsm_MapType tmx of
+        "TM_Race" -> Just MT_Race
+        "TM_Royal" -> Just MT_Royal
+        "TM_Stunt" -> Just MT_Stunt
+        "TM_Platform" -> Just MT_Platform
+        "Puzzle" -> Just MT_Puzzle
+        x -> Just $ MT_Other x
     }
 
 tmxSearchMapsFields :: TMXSearchMapsFields
-tmxSearchMapsFields = TMXSearchMapsFields ["MapId", "MapUid", "Name", "Medals.Author", "Tags"]
+tmxSearchMapsFields = TMXSearchMapsFields ["MapId", "MapUid", "Name", "Medals.Author", "Tags", "MapType"]
 
 data TMXSearchMaps
   = TMXSearchMaps
