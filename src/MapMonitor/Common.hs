@@ -1,4 +1,6 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module MapMonitor.Common (
   AppSettings (..),
@@ -6,10 +8,12 @@ module MapMonitor.Common (
   HasState (..),
   HasUnbeatenAtsCache (..),
   HasBeatenAtsCache (..),
+  HasBeatenMapPings (..),
   queryAcid,
   updateAcid,
   withAcid1,
   withAcid2,
+  settings_auth,
 )
 where
 
@@ -24,17 +28,20 @@ import Protolude
 import Servant.Client
 import UnliftIO.STM
 import UnliftIO.Retry
+import PingRPC
 
 data AppSettings
   = AppSettings
-  { _settings_auth :: Text
-  , _settings_openplanetAuthSecret :: Text
-  , _settings_mapsCacheDirectory :: Maybe FilePath
-  , _settings_logFile :: Maybe FilePath
+  { _settings_auth :: !Text
+  , _settings_openplanetAuthSecret :: !Text
+  , _settings_mapsCacheDirectory :: !(Maybe FilePath)
+  , _settings_logFile :: !(Maybe FilePath)
   }
   deriving (Generic, Show)
 
 instance FromDhall AppSettings
+
+$(makeLenses ''AppSettings)
 
 class HasAppSettings env where
   appSettingsL :: Lens' env AppSettings
@@ -47,6 +54,9 @@ class HasUnbeatenAtsCache env where
 
 class HasBeatenAtsCache env where
   beatenAtsCacheL :: Lens' env (TVar RecentlyBeatenAtsResponse)
+
+class HasBeatenMapPings env where
+  beatenMapPingsL :: Lens' env (TQueue PingRPCMessage)
 
 queryAcid q =
   view stateL >>= flip query' q

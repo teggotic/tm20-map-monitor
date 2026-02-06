@@ -20,12 +20,12 @@ class HasXertrovClient env where
 
 data XertrovMapMonitorNbPlayersResponse
   = XertrovMapMonitorNbPlayersResponse
-  { _xmpr_created_ts :: Int
-  , _xmpr_last_highest_score :: Int
-  , _xmpr_last_update_started_ts :: Int
-  , _xmpr_nb_players :: Int
-  , _xmpr_uid :: Text
-  , _xmpr_updated_ts :: Int
+  { _xmpr_created_ts :: !Int
+  , _xmpr_last_highest_score :: !Int
+  , _xmpr_last_update_started_ts :: !Int
+  , _xmpr_nb_players :: !Int
+  , _xmpr_uid :: !Text
+  , _xmpr_updated_ts :: !Int
   }
   deriving (Show)
 

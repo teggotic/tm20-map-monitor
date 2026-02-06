@@ -20,9 +20,9 @@ type UnbeatenAtTrack = (TMXId, Text, Text, Text, Text, Text, Int, Int, Double, I
 
 data UnbeatenAtsResponse
   = UnbeatenAtsResponse
-  { _uar_keys :: [Text]
-  , _uar_tracks :: [UnbeatenAtTrack]
-  , _uar_nbTracks :: Int
+  { _uar_keys :: ![Text]
+  , _uar_tracks :: ![UnbeatenAtTrack]
+  , _uar_nbTracks :: !Int
   }
   deriving (Show)
 
@@ -32,8 +32,8 @@ type BeatenAtTrack = (TMXId, Text, Text, Text, Text, Text, Int, Int, Int, Int, T
 
 data RecentlyBeatenAtsTracks
   = RecentlyBeatenAtsTracks
-  { _rbtr_nbTracks :: Int
-  , _rbtr_tracks :: [BeatenAtTrack]
+  { _rbtr_nbTracks :: !Int
+  , _rbtr_tracks :: ![BeatenAtTrack]
   }
   deriving (Show)
 
@@ -41,9 +41,9 @@ $(deriveJSON defaultOptions{fieldLabelModifier = drop (length @[] "_rbtr_")} ''R
 
 data RecentlyBeatenAtsResponse
   = RecentlyBeatenAtsResponse
-  { _rbar_keys :: [Text]
-  , _rbar_all :: RecentlyBeatenAtsTracks
-  , _rbar_below100k :: RecentlyBeatenAtsTracks
+  { _rbar_keys :: ![Text]
+  , _rbar_all :: !RecentlyBeatenAtsTracks
+  , _rbar_below100k :: !RecentlyBeatenAtsTracks
   }
   deriving (Show)
 
@@ -51,10 +51,10 @@ $(deriveJSON defaultOptions{fieldLabelModifier = drop (length @[] "_rbar_")} ''R
 
 data UnbeatenAtsLeaderboardResponse
   = UnbeatenAtsLeaderboardResponse
-  { _ualr_count_to_pos :: Map Int (Int, Int)
-  , _ualr_players :: [(Text, Int)]
-  , _ualr_nb_players :: Int
-  , _ualr__info :: Text
+  { _ualr_count_to_pos :: !(Map Int (Int, Int))
+  , _ualr_players :: !([(Text, Int)])
+  , _ualr_nb_players :: !Int
+  , _ualr__info :: !Text
   }
   deriving (Show)
 

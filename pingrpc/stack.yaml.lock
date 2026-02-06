@@ -3,14 +3,7 @@
 # For more information, please see the documentation at:
 #   https://docs.haskellstack.org/en/stable/topics/lock_files
 
-packages:
-- completed:
-    hackage: discord-haskell-1.18.0@sha256:0b88b1c391542b36243647f3533261867a1bd59cb2194519bc4b0e45b9a73797,7032
-    pantry-tree:
-      sha256: 08c931796e4cdab60dd889f6a7f2c8cbcb72f9cdedfeee683c3a0593294073f8
-      size: 3916
-  original:
-    hackage: discord-haskell-1.18.0@sha256:0b88b1c391542b36243647f3533261867a1bd59cb2194519bc4b0e45b9a73797,7032
+packages: []
 snapshots:
 - completed:
     sha256: 468e1afa06cd069e57554f10e84fdf1ac5e8893e3eefc503ef837e2449f7e60c

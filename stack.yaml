@@ -2,9 +2,12 @@ snapshot: lts-24.11
 
 packages:
 - .
+- pingrpc
+- api-integrations
 - deps/ixset-typed
 
-extra-deps: []
+extra-deps:
+- discord-haskell-1.18.0@sha256:0b88b1c391542b36243647f3533261867a1bd59cb2194519bc4b0e45b9a73797,7032
 
 docker:
   enable: false

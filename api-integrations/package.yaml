@@ -1,0 +1,54 @@
+name:                api-integrations
+version:             0.1.0.0
+#synopsis:
+#description:
+homepage:            https://github.com/githubuser/api-integrations#readme
+license:             BSD-3-Clause
+author:              Author name here
+maintainer:          example@example.com
+copyright:           2026 Author name here
+category:            Web
+extra-source-files: []
+
+dependencies:
+- base >= 4.7 && < 5
+- rio
+- protolude
+- lens
+- servant
+- servant-client
+- aeson
+- http-api-data
+- retry
+- time
+- unliftio
+- http-types
+
+default-extensions:
+- LambdaCase
+- NoImplicitPrelude
+- OverloadedStrings
+- TypeApplications
+- FlexibleContexts
+- FlexibleInstances
+- TypeFamilies
+- TypeOperators
+- DataKinds
+- ViewPatterns
+- BlockArguments
+
+ghc-options:
+- -Wall
+- -Wcompat
+- -Widentities
+- -Wincomplete-record-updates
+- -Wincomplete-uni-patterns
+- -Wmissing-export-lists
+- -Wmissing-home-modules
+- -Wpartial-fields
+- -Wredundant-constraints
+
+library:
+  source-dirs:      src
+
+github: githubuser/api-integrations

@@ -1,0 +1,61 @@
+cabal-version: 2.2
+
+-- This file has been generated from package.yaml by hpack version 0.38.1.
+--
+-- see: https://github.com/sol/hpack
+
+name:           api-integrations
+version:        0.1.0.0
+category:       Web
+homepage:       https://github.com/githubuser/api-integrations#readme
+bug-reports:    https://github.com/githubuser/api-integrations/issues
+author:         Author name here
+maintainer:     example@example.com
+copyright:      2026 Author name here
+license:        BSD-3-Clause
+build-type:     Simple
+
+source-repository head
+  type: git
+  location: https://github.com/githubuser/api-integrations
+
+library
+  exposed-modules:
+      MapMonitor.API.Nadeo
+      MapMonitor.API.OpenPlanet
+      MapMonitor.API.TMX
+      MapMonitor.API.Util
+      MapMonitor.API.XertroV
+  other-modules:
+      Paths_api_integrations
+  autogen-modules:
+      Paths_api_integrations
+  hs-source-dirs:
+      src
+  default-extensions:
+      LambdaCase
+      NoImplicitPrelude
+      OverloadedStrings
+      TypeApplications
+      FlexibleContexts
+      FlexibleInstances
+      TypeFamilies
+      TypeOperators
+      DataKinds
+      ViewPatterns
+      BlockArguments
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  build-depends:
+      aeson
+    , base >=4.7 && <5
+    , http-api-data
+    , http-types
+    , lens
+    , protolude
+    , retry
+    , rio
+    , servant
+    , servant-client
+    , time
+    , unliftio
+  default-language: Haskell2010

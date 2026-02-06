@@ -3,6 +3,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module MapMonitor.DB (
   TMMap (..),
@@ -39,11 +40,22 @@ import Data.Time
 import GHC.Exts (IsList (fromList))
 import Protolude
 
+data TMXMapType
+  = MT_Race
+  | MT_Royal
+  | MT_Stunt
+  | MT_Platform
+  | MT_Puzzle
+  | MT_Other Text
+  deriving (Show, Eq, Ord, Generic)
+
+$(deriveSafeCopy 0 'base ''TMXMapType)
+
 data TMMapRecord
   = TMMapRecord
-  { _tmmr_userId :: Text
-  , _tmmr_time :: Int
-  , _tmmr_timestamp :: Int
+  { _tmmr_userId :: !Text
+  , _tmmr_time :: !Int
+  , _tmmr_timestamp :: !Int
   }
   deriving (Show)
 
@@ -58,17 +70,17 @@ $(deriveSafeCopy 0 'base ''TMXId)
 
 data TMMap_v4
   = TMMap_v4
-  { v4_tmm_tmxId :: Int
-  , v4_tmm_uid :: Text
-  , v4_tmm_name :: Text
-  , v4_tmm_authorMedal :: Int
-  , v4_tmm_authorUid :: Maybe Text
-  , v4_tmm_tags :: [Int]
-  , v4_tmm_currentWR :: Maybe TMMapRecord
-  , v4_tmm_uploadedAt :: Maybe UTCTime
-  , v4_tmm_hiddenReason :: Maybe Text
-  , v4_tmm_atSetByPlugin :: Maybe Bool
-  , v4_tmm_nbPlayers :: Maybe Int
+  { v4_tmm_tmxId :: !Int
+  , v4_tmm_uid :: !Text
+  , v4_tmm_name :: !Text
+  , v4_tmm_authorMedal :: !Int
+  , v4_tmm_authorUid :: !(Maybe Text)
+  , v4_tmm_tags :: ![Int]
+  , v4_tmm_currentWR :: !(Maybe TMMapRecord)
+  , v4_tmm_uploadedAt :: !(Maybe UTCTime)
+  , v4_tmm_hiddenReason :: !(Maybe Text)
+  , v4_tmm_atSetByPlugin :: !(Maybe Bool)
+  , v4_tmm_nbPlayers :: !(Maybe Int)
   }
   deriving (Show)
 
@@ -76,17 +88,17 @@ $(deriveSafeCopy 4 'base ''TMMap_v4)
 
 data TMMap_v5
   = TMMap_v5
-  { v5_tmm_tmxId :: TMXId
-  , v5_tmm_uid :: Text
-  , v5_tmm_name :: Text
-  , v5_tmm_authorMedal :: Int
-  , v5_tmm_authorUid :: (Maybe Text)
-  , v5_tmm_tags :: [Int]
-  , v5_tmm_currentWR :: (Maybe TMMapRecord)
-  , v5_tmm_uploadedAt :: (Maybe UTCTime)
-  , v5_tmm_hiddenReason :: (Maybe Text)
-  , v5_tmm_atSetByPlugin :: (Maybe Bool)
-  , v5_tmm_nbPlayers :: (Maybe Int)
+  { v5_tmm_tmxId :: !TMXId
+  , v5_tmm_uid :: !Text
+  , v5_tmm_name :: !Text
+  , v5_tmm_authorMedal :: !Int
+  , v5_tmm_authorUid :: !((Maybe Text))
+  , v5_tmm_tags :: ![Int]
+  , v5_tmm_currentWR :: !((Maybe TMMapRecord))
+  , v5_tmm_uploadedAt :: !((Maybe UTCTime))
+  , v5_tmm_hiddenReason :: !((Maybe Text))
+  , v5_tmm_atSetByPlugin :: !((Maybe Bool))
+  , v5_tmm_nbPlayers :: !((Maybe Int))
   }
   deriving (Generic, Show)
 
@@ -111,18 +123,18 @@ $(deriveSafeCopy 5 'extension ''TMMap_v5)
 
 data TMMap_v6
   = TMMap_v6
-  { v6_tmm_tmxId :: TMXId
-  , v6_tmm_uid :: Text
-  , v6_tmm_name :: Text
-  , v6_tmm_authorMedal :: Int
-  , v6_tmm_authorUid :: (Maybe Text)
-  , v6_tmm_tags :: [Int]
-  , v6_tmm_currentWR :: (Maybe TMMapRecord)
-  , v6_tmm_uploadedAt :: (Maybe UTCTime)
-  , v6_tmm_hiddenReason :: (Maybe Text)
-  , v6_tmm_atSetByPlugin :: (Maybe Bool)
-  , v6_tmm_nbPlayers :: (Maybe Int)
-  , v6_tmm_reportedBy :: Map Text (UTCTime, Text)
+  { v6_tmm_tmxId :: !TMXId
+  , v6_tmm_uid :: !Text
+  , v6_tmm_name :: !Text
+  , v6_tmm_authorMedal :: !Int
+  , v6_tmm_authorUid :: !((Maybe Text))
+  , v6_tmm_tags :: ![Int]
+  , v6_tmm_currentWR :: !((Maybe TMMapRecord))
+  , v6_tmm_uploadedAt :: !((Maybe UTCTime))
+  , v6_tmm_hiddenReason :: !((Maybe Text))
+  , v6_tmm_atSetByPlugin :: !((Maybe Bool))
+  , v6_tmm_nbPlayers :: !((Maybe Int))
+  , v6_tmm_reportedBy :: !(Map Text (UTCTime, Text))
   }
   deriving (Generic, Show)
 
@@ -146,52 +158,40 @@ instance Migrate TMMap_v6 where
 
 $(deriveSafeCopy 6 'extension ''TMMap_v6)
 
-
-data TMXMapType
-  = MT_Race
-  | MT_Royal
-  | MT_Stunt
-  | MT_Platform
-  | MT_Puzzle
-  | MT_Other Text
-  deriving (Show, Eq, Ord, Generic)
-
-$(deriveSafeCopy 0 'base ''TMXMapType)
-
 data TMMap
   = TMMap
-  { _tmm_tmxId :: TMXId
-  , _tmm_uid :: Text
-  , _tmm_name :: Text
-  , _tmm_authorMedal :: Int
-  , _tmm_authorUid :: (Maybe Text)
-  , _tmm_tags :: [Int]
-  , _tmm_currentWR :: (Maybe TMMapRecord)
-  , _tmm_uploadedAt :: (Maybe UTCTime)
-  , _tmm_hiddenReason :: (Maybe Text)
-  , _tmm_atSetByPlugin :: (Maybe Bool)
-  , _tmm_nbPlayers :: (Maybe Int)
-  , _tmm_reportedBy :: Map Text (UTCTime, Text)
-  , _tmm_mapType :: Maybe TMXMapType
+  { _tmm_tmxId :: !TMXId
+  , _tmm_uid :: !Text
+  , _tmm_name :: !Text
+  , _tmm_authorMedal :: !Int
+  , _tmm_authorUid :: !((Maybe Text))
+  , _tmm_tags :: ![Int]
+  , _tmm_currentWR :: !((Maybe TMMapRecord))
+  , _tmm_uploadedAt :: !((Maybe UTCTime))
+  , _tmm_hiddenReason :: !((Maybe Text))
+  , _tmm_atSetByPlugin :: !((Maybe Bool))
+  , _tmm_nbPlayers :: !((Maybe Int))
+  , _tmm_reportedBy :: !(Map Text (UTCTime, Text))
+  , _tmm_mapType :: !(Maybe TMXMapType)
   }
   deriving (Generic, Show)
 
 instance Migrate TMMap where
   type MigrateFrom TMMap = TMMap_v6
-  migrate (TMMap_v6 tmxId uid name authorMedal authorUid tags currentWR uploadedAt hiddenReason atSetByPlugin nbPlayers reportedBy) =
+  migrate (TMMap_v6 {..}) =
     TMMap
-      { _tmm_tmxId = tmxId
-      , _tmm_uid = uid
-      , _tmm_name = name
-      , _tmm_authorMedal = authorMedal
-      , _tmm_authorUid = authorUid
-      , _tmm_tags = tags
-      , _tmm_currentWR = currentWR
-      , _tmm_uploadedAt = uploadedAt
-      , _tmm_hiddenReason = hiddenReason
-      , _tmm_atSetByPlugin = atSetByPlugin
-      , _tmm_nbPlayers = nbPlayers
-      , _tmm_reportedBy = reportedBy
+      { _tmm_tmxId = v6_tmm_tmxId
+      , _tmm_uid = v6_tmm_uid
+      , _tmm_name = v6_tmm_name
+      , _tmm_authorMedal = v6_tmm_authorMedal
+      , _tmm_authorUid = v6_tmm_authorUid
+      , _tmm_tags = v6_tmm_tags
+      , _tmm_currentWR = v6_tmm_currentWR
+      , _tmm_uploadedAt = v6_tmm_uploadedAt
+      , _tmm_hiddenReason = v6_tmm_hiddenReason
+      , _tmm_atSetByPlugin = v6_tmm_atSetByPlugin
+      , _tmm_nbPlayers = v6_tmm_nbPlayers
+      , _tmm_reportedBy = v6_tmm_reportedBy
       , _tmm_mapType = Nothing
       }
 
@@ -199,17 +199,17 @@ $(deriveSafeCopy 7 'extension ''TMMap)
 
 data TMMapPatch_v0
   = TMMapPatch_v0
-  { v0_tmmp_tmxId :: TMXId
-  , v0_tmmp_uid :: Maybe Text
-  , v0_tmmp_name :: Maybe Text
-  , v0_tmmp_authorMedal :: Maybe Int
-  , v0_tmmp_authorUid :: Maybe (Maybe Text)
-  , v0_tmmp_tags :: Maybe [Int]
-  , v0_tmmp_currentWR :: Maybe (Maybe TMMapRecord)
-  , v0_tmmp_uploadedAt :: Maybe (Maybe UTCTime)
-  , v0_tmmp_hiddenReason :: Maybe (Maybe Text)
-  , v0_tmmp_atSetByPlugin :: Maybe (Maybe Bool)
-  , v0_tmmp_nbPlayers :: Maybe (Maybe Int)
+  { v0_tmmp_tmxId :: !TMXId
+  , v0_tmmp_uid :: !(Maybe Text)
+  , v0_tmmp_name :: !(Maybe Text)
+  , v0_tmmp_authorMedal :: !(Maybe Int)
+  , v0_tmmp_authorUid :: !(Maybe (Maybe Text))
+  , v0_tmmp_tags :: !(Maybe [Int])
+  , v0_tmmp_currentWR :: !(Maybe (Maybe TMMapRecord))
+  , v0_tmmp_uploadedAt :: !(Maybe (Maybe UTCTime))
+  , v0_tmmp_hiddenReason :: !(Maybe (Maybe Text))
+  , v0_tmmp_atSetByPlugin :: !(Maybe (Maybe Bool))
+  , v0_tmmp_nbPlayers :: !(Maybe (Maybe Int))
   }
   deriving (Show)
 
@@ -217,18 +217,18 @@ $(deriveSafeCopy 0 'base ''TMMapPatch_v0)
 
 data TMMapPatch_v1
   = TMMapPatch_v1
-  { v1_tmmp_tmxId :: TMXId
-  , v1_tmmp_uid :: Maybe Text
-  , v1_tmmp_name :: Maybe Text
-  , v1_tmmp_authorMedal :: Maybe Int
-  , v1_tmmp_authorUid :: Maybe (Maybe Text)
-  , v1_tmmp_tags :: Maybe [Int]
-  , v1_tmmp_currentWR :: Maybe (Maybe TMMapRecord)
-  , v1_tmmp_uploadedAt :: Maybe (Maybe UTCTime)
-  , v1_tmmp_hiddenReason :: Maybe (Maybe Text)
-  , v1_tmmp_atSetByPlugin :: Maybe (Maybe Bool)
-  , v1_tmmp_nbPlayers :: Maybe (Maybe Int)
-  , v1_tmmp_reportedBy :: Maybe (Map Text (Maybe (UTCTime, Text)))
+  { v1_tmmp_tmxId :: !TMXId
+  , v1_tmmp_uid :: !(Maybe Text)
+  , v1_tmmp_name :: !(Maybe Text)
+  , v1_tmmp_authorMedal :: !(Maybe Int)
+  , v1_tmmp_authorUid :: !(Maybe (Maybe Text))
+  , v1_tmmp_tags :: !(Maybe [Int])
+  , v1_tmmp_currentWR :: !(Maybe (Maybe TMMapRecord))
+  , v1_tmmp_uploadedAt :: !(Maybe (Maybe UTCTime))
+  , v1_tmmp_hiddenReason :: !(Maybe (Maybe Text))
+  , v1_tmmp_atSetByPlugin :: !(Maybe (Maybe Bool))
+  , v1_tmmp_nbPlayers :: !(Maybe (Maybe Int))
+  , v1_tmmp_reportedBy :: !(Maybe (Map Text (Maybe (UTCTime, Text))))
   }
   deriving (Show)
 
@@ -254,19 +254,19 @@ $(deriveSafeCopy 1 'extension ''TMMapPatch_v1)
 
 data TMMapPatch
   = TMMapPatch
-  { _tmmp_tmxId :: TMXId
-  , _tmmp_uid :: Maybe Text
-  , _tmmp_name :: Maybe Text
-  , _tmmp_authorMedal :: Maybe Int
-  , _tmmp_authorUid :: Maybe (Maybe Text)
-  , _tmmp_tags :: Maybe [Int]
-  , _tmmp_currentWR :: Maybe (Maybe TMMapRecord)
-  , _tmmp_uploadedAt :: Maybe (Maybe UTCTime)
-  , _tmmp_hiddenReason :: Maybe (Maybe Text)
-  , _tmmp_atSetByPlugin :: Maybe (Maybe Bool)
-  , _tmmp_nbPlayers :: Maybe (Maybe Int)
-  , _tmmp_reportedBy :: Maybe (Map Text (Maybe (UTCTime, Text)))
-  , _tmmp_mapType :: Maybe (Maybe TMXMapType)
+  { _tmmp_tmxId :: !TMXId
+  , _tmmp_uid :: !(Maybe Text)
+  , _tmmp_name :: !(Maybe Text)
+  , _tmmp_authorMedal :: !(Maybe Int)
+  , _tmmp_authorUid :: !(Maybe (Maybe Text))
+  , _tmmp_tags :: !(Maybe [Int])
+  , _tmmp_currentWR :: !(Maybe (Maybe TMMapRecord))
+  , _tmmp_uploadedAt :: !(Maybe (Maybe UTCTime))
+  , _tmmp_hiddenReason :: !(Maybe (Maybe Text))
+  , _tmmp_atSetByPlugin :: !(Maybe (Maybe Bool))
+  , _tmmp_nbPlayers :: !(Maybe (Maybe Int))
+  , _tmmp_reportedBy :: !(Maybe (Map Text (Maybe (UTCTime, Text))))
+  , _tmmp_mapType :: !(Maybe (Maybe TMXMapType))
   }
   deriving (Show)
 
@@ -332,9 +332,9 @@ applyPatch patch tmMap =
 
 data MapMonitorState_v1
   = MapMonitorState_v1
-  { v1_mms_lastTmxId :: Int
-  , v1_mms_ubeatenMaps :: Map Int TMMap
-  , v1_mms_beatenMaps :: [TMMap]
+  { v1_mms_lastTmxId :: !Int
+  , v1_mms_ubeatenMaps :: !(Map Int TMMap)
+  , v1_mms_beatenMaps :: ![TMMap]
   }
   deriving (Show)
 
@@ -342,8 +342,8 @@ $(deriveSafeCopy 1 'base ''MapMonitorState_v1)
 
 data MapMonitorState
   = MapMonitorState
-  { mms_ubeatenMaps :: Map TMXId TMMap
-  , mms_beatenMaps :: [TMMap]
+  { mms_ubeatenMaps :: !(Map TMXId TMMap)
+  , mms_beatenMaps :: ![TMMap]
   }
   deriving (Show)
 
@@ -389,7 +389,7 @@ isMapUnbeaten :: TMMap -> Bool
 isMapUnbeaten tmMap =
   maybe True (\wr -> _tmmr_time wr > _tmm_authorMedal tmMap) (_tmm_currentWR tmMap)
 
-shuffleBeatenMaps :: Update MapMonitorState ()
+shuffleBeatenMaps :: Update MapMonitorState [TMMap]
 shuffleBeatenMaps = do
   st <- get
   let
@@ -402,6 +402,7 @@ shuffleBeatenMaps = do
       { mms_ubeatenMaps = unbeaten
       , mms_beatenMaps = Map.elems beaten <> mms_beatenMaps st
       }
+  return $ Map.elems beaten
 
 getMapsByIds :: [TMXId] -> Query MapMonitorState [TMMap]
 getMapsByIds ids = do

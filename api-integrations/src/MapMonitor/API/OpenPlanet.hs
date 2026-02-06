@@ -23,9 +23,9 @@ class HasOpenPlanetClient env where
 
 data OpenPlanetAuthValidateResponse
   = OpenPlanetAuthValidateResponse
-  { _opavr_account_id :: Text
-  , _opavr_display_name :: Text
-  , _opavr_token_time :: Int
+  { _opavr_account_id :: !Text
+  , _opavr_display_name :: !Text
+  , _opavr_token_time :: !Int
   }
   deriving (Show)
 
@@ -33,8 +33,8 @@ $(deriveJSON defaultOptions{fieldLabelModifier = drop (Text.length "_opavr_")} '
 
 data OpenPlanetAuthValidateRequest
   = OpenPlanetAuthValidateRequest
-  { _opavr_token :: Text
-  , _opavr_secret :: Text
+  { _opavr_token :: !Text
+  , _opavr_secret :: !Text
   }
   deriving (Show)
 

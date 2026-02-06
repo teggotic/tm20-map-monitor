@@ -5,6 +5,7 @@
 module MapMonitor.Server
 where
 
+import qualified System.ZMQ4 as ZMQ
 import Control.Category (id)
 import Control.Lens
 import Data.Acid
@@ -17,6 +18,7 @@ import MapMonitor.DB
 import MapMonitor.Integrations (addMissingMaps)
 import qualified Network.HTTP.Types as H
 import Network.Wai as Wai
+import PingRPC
 import Protolude hiding (atomically)
 import RIO (toStrictBytes, HasLogFunc (..), LogFunc)
 import qualified RIO.Text as Text
@@ -34,20 +36,21 @@ import Data.Fixed
 
 data AppState
   = AppState
-  { _appState_acid :: AcidState MapMonitorState
-  , _appState_unbeatenAtsCache :: TVar UnbeatenAtsResponse
-  , _appState_beatenAtsCache :: TVar RecentlyBeatenAtsResponse
-  , _appState_coreNadeoClient :: ClientEnv
-  , _appState_liveServicesNadeoClient :: ClientEnv
-  , _appState_tmxClient :: ClientEnv
-  , _appState_xertrovClient :: ClientEnv
-  , _appState_openPlanetClient :: ClientEnv
-  , _appState_nadeoToken :: TMVar (Maybe NadeoTokenState)
-  , _appState_settings :: AppSettings
-  , _appState_jwtSettings :: JWTSettings
-  , _appState_nadeoThrottler :: TMVar UTCTime
-  , _appState_nadeoRequestRate :: Pico
-  , _appState_logFunc :: LogFunc
+  { _appState_acid :: !(AcidState MapMonitorState)
+  , _appState_unbeatenAtsCache :: !(TVar UnbeatenAtsResponse)
+  , _appState_beatenAtsCache :: !(TVar RecentlyBeatenAtsResponse)
+  , _appState_coreNadeoClient :: !ClientEnv
+  , _appState_liveServicesNadeoClient :: !ClientEnv
+  , _appState_tmxClient :: !ClientEnv
+  , _appState_xertrovClient :: !ClientEnv
+  , _appState_openPlanetClient :: !ClientEnv
+  , _appState_nadeoToken :: !(TMVar (Maybe NadeoTokenState))
+  , _appState_settings :: !AppSettings
+  , _appState_jwtSettings :: !JWTSettings
+  , _appState_nadeoThrottler :: !(TMVar UTCTime)
+  , _appState_nadeoRequestRate :: !Pico
+  , _appState_logFunc :: !LogFunc
+  , _appState_pubSocket :: !(ZMQ.Socket ZMQ.Pub)
   }
 
 $(makeLenses ''AppState)
@@ -63,6 +66,9 @@ instance HasState (AcidState MapMonitorState) where
 
 instance HasNadeoCoreClient AppState where
   nadeoCoreClientL = appState_coreNadeoClient
+
+instance HasNadeoAuthToken AppState where
+  nadeoAuthTokenL = appSettingsL . settings_auth
 
 instance HasXertrovClient AppState where
   xertrovClientL = appState_xertrovClient
@@ -93,6 +99,9 @@ instance HasNadeoRequestRate AppState where
 
 instance HasLogFunc AppState where
   logFuncL = appState_logFunc
+
+instance HasPubRpcSocket AppState where
+  pubRpcSocketL = appState_pubSocket
 
 type AppM = ReaderT AppState Servant.Server.Handler
 
@@ -131,12 +140,17 @@ tmxApiServer = unbeaten :<|> unbeatenLeaderboard :<|> beaten
     readTVarIO =<< view unbeatenAtsCacheL
 
 managementApiServer :: AuthResult AUser -> ServerT ManagementAPI AppM
-managementApiServer (Authenticated auser) = managementReportMap :<|> managementAddMissingMap
+managementApiServer (Authenticated auser) = managementReportMap :<|> managementDeleteReport :<|> managementAddMissingMap
  where
   managementReportMap tmxId payload = do
     -- putText $ "Reporting map: " <> show tmxId <> " with payload: " <> show payload
     now <- getCurrentTime
     withAcid2 reportMap (TMXId tmxId) (_auser_uid auser, now, _rmp_reason payload)
+    refreshCaches
+    return NoContent
+
+  managementDeleteReport tmxId = do
+    void $ withAcid1 updateMaps $ [(defPatch $ TMXId tmxId) {_tmmp_reportedBy = Just $ Map.fromList [(_auser_uid auser, Nothing)]}]
     refreshCaches
     return NoContent
 

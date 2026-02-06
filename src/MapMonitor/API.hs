@@ -14,7 +14,7 @@ import Servant.Auth
 import Servant.Auth.JWT
 
 data AUser = AUser
-  { _auser_uid :: Text
+  { _auser_uid :: !Text
   }
   deriving (Show)
 
@@ -24,7 +24,7 @@ instance ToJWT AUser
 
 data InternalAuth
   = InternalAuth
-  { _ia_token :: Text
+  { _ia_token :: !Text
   }
   deriving (Show)
 
@@ -42,7 +42,7 @@ type TMXApi =
 
 data ReportMapPayload
   = ReportMapPayload
-  { _rmp_reason :: Text
+  { _rmp_reason :: !Text
   }
   deriving (Show)
 
@@ -50,6 +50,7 @@ $(deriveJSON defaultOptions{fieldLabelModifier = drop (Text.length "_rmp_")} ''R
 
 type ManagementAPI =
   ( "management" :> "report_map" :> Capture "mapId" Int :> ReqBody '[JSON] ReportMapPayload :> Post '[JSON] NoContent
+      :<|> "management" :> "report_map" :> Capture "mapId" Int :> Delete '[JSON] NoContent
       :<|> "management" :> "add_missing_map" :> Capture "mapId" Int :> Post '[JSON] NoContent
   )
 
