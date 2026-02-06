@@ -3,6 +3,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module MapMonitor.DB (
   TMMap (..),
@@ -38,6 +39,17 @@ import Data.SafeCopy
 import Data.Time
 import GHC.Exts (IsList (fromList))
 import Protolude
+
+data TMXMapType
+  = MT_Race
+  | MT_Royal
+  | MT_Stunt
+  | MT_Platform
+  | MT_Puzzle
+  | MT_Other Text
+  deriving (Show, Eq, Ord, Generic)
+
+$(deriveSafeCopy 0 'base ''TMXMapType)
 
 data TMMapRecord
   = TMMapRecord
@@ -146,18 +158,6 @@ instance Migrate TMMap_v6 where
 
 $(deriveSafeCopy 6 'extension ''TMMap_v6)
 
-
-data TMXMapType
-  = MT_Race
-  | MT_Royal
-  | MT_Stunt
-  | MT_Platform
-  | MT_Puzzle
-  | MT_Other Text
-  deriving (Show, Eq, Ord, Generic)
-
-$(deriveSafeCopy 0 'base ''TMXMapType)
-
 data TMMap
   = TMMap
   { _tmm_tmxId :: TMXId
@@ -178,20 +178,20 @@ data TMMap
 
 instance Migrate TMMap where
   type MigrateFrom TMMap = TMMap_v6
-  migrate (TMMap_v6 tmxId uid name authorMedal authorUid tags currentWR uploadedAt hiddenReason atSetByPlugin nbPlayers reportedBy) =
+  migrate (TMMap_v6 {..}) =
     TMMap
-      { _tmm_tmxId = tmxId
-      , _tmm_uid = uid
-      , _tmm_name = name
-      , _tmm_authorMedal = authorMedal
-      , _tmm_authorUid = authorUid
-      , _tmm_tags = tags
-      , _tmm_currentWR = currentWR
-      , _tmm_uploadedAt = uploadedAt
-      , _tmm_hiddenReason = hiddenReason
-      , _tmm_atSetByPlugin = atSetByPlugin
-      , _tmm_nbPlayers = nbPlayers
-      , _tmm_reportedBy = reportedBy
+      { _tmm_tmxId = v6_tmm_tmxId
+      , _tmm_uid = v6_tmm_uid
+      , _tmm_name = v6_tmm_name
+      , _tmm_authorMedal = v6_tmm_authorMedal
+      , _tmm_authorUid = v6_tmm_authorUid
+      , _tmm_tags = v6_tmm_tags
+      , _tmm_currentWR = v6_tmm_currentWR
+      , _tmm_uploadedAt = v6_tmm_uploadedAt
+      , _tmm_hiddenReason = v6_tmm_hiddenReason
+      , _tmm_atSetByPlugin = v6_tmm_atSetByPlugin
+      , _tmm_nbPlayers = v6_tmm_nbPlayers
+      , _tmm_reportedBy = v6_tmm_reportedBy
       , _tmm_mapType = Nothing
       }
 
