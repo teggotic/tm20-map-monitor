@@ -6,6 +6,9 @@ cradle:
     - path: "./app/Main.hs"
       component: "map-monitor:exe:map-monitor-exe"
 
+    - path: "./dsbot/Main.hs"
+      component: "map-monitor:exe:map-monitor-ping-bot-exe"
+
     - path: "./test"
       component: "map-monitor:test:map-monitor-test"
 
