@@ -1,6 +1,7 @@
 module Main (main) where
 
 import Lib
+import Control.Monad.Logger
 import Data.Acid
 import Data.Acid.Remote (acidServer, openRemoteState, skipAuthenticationCheck, skipAuthenticationPerform)
 import Data.Default
@@ -51,6 +52,9 @@ main = do
     --   processAtCheckQueue checkAtQueue
     _ <- forkIO $ do
       liftIO $ acidServer skipAuthenticationCheck 8082 acid
+
+    _ <- forkIO $ do
+      runStdoutLoggingT runClient
 
     _ <- forkIO do
       forever do

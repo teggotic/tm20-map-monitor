@@ -65,6 +65,7 @@ dependencies:
 - stm-conduit
 - pingrpc
 - api-integrations
+- monad-logger
 
 default-extensions:
 - LambdaCase

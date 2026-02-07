@@ -22,6 +22,11 @@ dependencies:
 - rio
 - protolude
 - json-rpc
+- conduit
+- conduit-extra
+- monad-logger
+- unliftio
+- aeson
 
 default-extensions:
 - LambdaCase

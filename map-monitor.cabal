@@ -81,6 +81,7 @@ library
     , http-types
     , ixset-typed
     , lens
+    , monad-logger
     , network
     , pingrpc
     , prometheus-client
@@ -151,6 +152,7 @@ executable map-monitor-exe
     , ixset-typed
     , lens
     , map-monitor
+    , monad-logger
     , network
     , pingrpc
     , prometheus-client
@@ -226,6 +228,7 @@ executable map-monitor-ping-bot-exe
     , http-types
     , ixset-typed
     , lens
+    , monad-logger
     , network
     , pingrpc
     , prometheus-client
@@ -302,6 +305,7 @@ test-suite map-monitor-test
     , ixset-typed
     , lens
     , map-monitor
+    , monad-logger
     , network
     , pingrpc
     , prometheus-client

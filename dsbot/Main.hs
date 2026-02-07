@@ -3,22 +3,24 @@
 module Main where
 
 import Protolude hiding (isPrefixOf, toLower, threadDelay)
+import Control.Monad.Logger
+import UnliftIO.STM
 import RIO
 import           Control.Monad (when, void)
 import           UnliftIO.Concurrent
 -- import qualified Data.Text.IO as TIO
 import RIO.Text
+import PingRPC
 
 import           Discord
 import           Discord.Types
 import qualified Discord.Requests as R
 
 -- | Replies "pong" to every message that starts with "ping"
-pingpongExample :: IO ()
-pingpongExample = do
+pingpongExample q = do
     userFacingError <- runDiscord $ def
              { discordToken = ""
-             , discordOnEvent = eventHandler
+             , discordOnEvent = eventHandler q
              , discordOnLog = \s -> putText s >> putText ""
              -- , discordOnStart = startHandler
              } -- if you see OnLog error, post in the discord / open an issue
@@ -39,8 +41,8 @@ pingpongExample = do
 --       _ <- restCall (R.CreateMessage (channelId chan) "Hello from discord-haskell!")
 --       pure ()
 --
-eventHandler :: Event -> DiscordHandler ()
-eventHandler event = do
+eventHandler :: TQueue PingRPCMessage -> Event -> DiscordHandler ()
+eventHandler q event = do
   print event
   case event of
     Ready _ user _ _ _ _ _ -> do
@@ -62,4 +64,6 @@ isPing :: Message -> Bool
 isPing = ("ping" `isPrefixOf`) . toLower . messageContent
 
 --
-main = pingpongExample
+main = do
+  runStdoutLoggingT runServer
+  -- pingpongExample

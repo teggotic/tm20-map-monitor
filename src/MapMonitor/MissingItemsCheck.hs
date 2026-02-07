@@ -6,6 +6,10 @@ import MapMonitor.Common
 import Data.Aeson
 import Data.Aeson.TH
 import Protolude
+import qualified RIO.Text as Text
+import UnliftIO
+import System.Process.Typed
+import RIO (tshow)
 
 
 data MissingItemsReport
@@ -36,7 +40,7 @@ checkMissingItems tmxId = do
                   putText $ "Failed to parse EmbedsChecker output: " <> tshow out
                   return Nothing
                 Just report -> do
-                  return $ Just $ maybe NoMissingItems MissingItems $ _mir_hasProperlyEmbeddedBlocks report
+                  return $ Just $ bool NoMissingItems MissingItems $ _mir_hasProperlyEmbeddedBlocks report
             (ExitFailure _, (tshow -> out)) -> do
               putText $ "Failed to run AT validation" <> out
               return Nothing
