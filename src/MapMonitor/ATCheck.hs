@@ -34,25 +34,21 @@ checkAtSetByPlugin tmxId = do
       >>= \case
         Nothing -> return Nothing
         Just mapFile -> do
-          readProcessStdout (proc "MapValidationChecker" ["--single", Text.unpack mapFile, "--strict-gps"])
-            >>= \case
-              (ExitSuccess, out) -> do
-                let result = decode @MapValidationCheckerReport out
-                case result of
-                  Nothing -> do
-                    putText $ "Failed to parse MapValidationChecker output: " <> tshow out
-                    return Nothing
-                  Just report -> do
-                    if _mvcr_validated report == "Yes"
-                      then do
-                        -- putText $ "Map is valid"
-                        return $ Just False
-                      else do
-                        -- putText $ "Map is invalid: " <> show (_mvcr_note report)
-                        return $ Just True
-              (ExitFailure _, (tshow -> out)) -> do
-                putText $ "Failed to run AT validation" <> out
-                return Nothing
+          readProcessStdout (proc "MapValidationChecker" ["--single", Text.unpack mapFile, "--strict-gps"]) >>= \case
+            (ExitSuccess, out) -> do
+              case decode @MapValidationCheckerReport out of
+                Nothing -> do
+                  putText $ "Failed to parse MapValidationChecker output: " <> tshow out
+                  return Nothing
+                Just report -> do
+                  if _mvcr_validated report == "Yes"
+                    then do
+                      return $ Just False
+                    else do
+                      return $ Just True
+            (ExitFailure _, (tshow -> out)) -> do
+              putText $ "Failed to run AT validation" <> out
+              return Nothing
   case res of
     Left err -> do
       putText $ "Error: " <> show err

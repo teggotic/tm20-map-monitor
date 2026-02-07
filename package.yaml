@@ -63,6 +63,8 @@ dependencies:
 - conduit
 - directory
 - stm-conduit
+- pingrpc
+- api-integrations
 
 default-extensions:
 - LambdaCase
@@ -142,7 +144,7 @@ executables:
             - -rtsopts
             - -with-rtsopts=-N
     dependencies:
-    - map-monitor
+    - pingrpc
     - discord-haskell
 
 tests:

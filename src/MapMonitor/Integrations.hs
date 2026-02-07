@@ -23,6 +23,30 @@ import RIO (logInfo, HasLogFunc, displayShow, logError)
 import qualified Prelude
 import Data.Conduit.TQueue (sinkTQueue)
 
+tmxMapToTMMap :: TMXSearchMapsMap -> TMMap
+tmxMapToTMMap tmx =
+  TMMap
+    { _tmm_tmxId = TMXId $ _tmxsm_MapId tmx
+    , _tmm_uid = _tmxsm_MapUid tmx
+    , _tmm_name = _tmxsm_Name tmx
+    , _tmm_authorMedal = _tmxsm_Author $ _tmxsm_Medals tmx
+    , _tmm_authorUid = Nothing
+    , _tmm_currentWR = Nothing
+    , _tmm_uploadedAt = Nothing
+    , _tmm_tags = _tmxsmt_TagId <$> _tmxsm_Tags tmx
+    , _tmm_hiddenReason = Nothing
+    , _tmm_atSetByPlugin = Nothing
+    , _tmm_nbPlayers = Nothing
+    , _tmm_reportedBy = mempty
+    , _tmm_mapType = case _tmxsm_MapType tmx of
+        "TM_Race" -> Just MT_Race
+        "TM_Royal" -> Just MT_Royal
+        "TM_Stunt" -> Just MT_Stunt
+        "TM_Platform" -> Just MT_Platform
+        "Puzzle" -> Just MT_Puzzle
+        x -> Just $ MT_Other x
+    }
+
 iterTmxMaps :: (MonadIO m, MonadReader env m, HasTMXClient env, HasLogFunc env) => Int -> Maybe Int -> ConduitT () TMMap m ()
 iterTmxMaps chnkSize after = do
   respE <- runInClient tmxClientL $ tmxSearchMaps $ TMXSearchMaps{_tmxsm_ids = [], _tmxsm_count = Just (chnkSize `min` 200), _tmxsm_after = after, _tmxsm_from = Nothing, _tmxsm_order1 = Just 6}
@@ -36,7 +60,7 @@ iterTmxMaps chnkSize after = do
       when (_tmxsr_More resp) $ do
         iterTmxMaps chnkSize (Just $ _tmxsm_MapId $ last $ _tmxsr_Results resp)
 
-fullRescan :: (MonadReader env m, HasLogFunc env, HasNadeoCoreClient env, HasAppSettings env, HasNadeoTokenState env, HasNadeoLiveClient env, HasNadeoRequestRate env, HasNadeoThrottler env, HasState env, HasTMXClient env, MonadFail m, MonadUnliftIO m  ) => TQueue TMMap -> m ()
+fullRescan :: (MonadReader env m, HasLogFunc env, HasNadeoCoreClient env, HasNadeoTokenState env, HasNadeoLiveClient env, HasNadeoRequestRate env, HasNadeoThrottler env, HasState env, HasTMXClient env, MonadFail m, MonadUnliftIO m, HasNadeoAuthToken env) => TQueue TMMap -> m ()
 fullRescan checkAtQueue = do
   ids <- getAllKnownIds
   runConduit $
@@ -52,7 +76,7 @@ fullRescan checkAtQueue = do
     .| filterC isMapUnbeaten
     .| sinkTQueue checkAtQueue
 
-refreshRecordsC :: (MonadIO m, MonadReader env m, HasLogFunc env, HasNadeoCoreClient env, HasAppSettings env, HasNadeoTokenState env, HasNadeoLiveClient env, HasNadeoRequestRate env, HasNadeoThrottler env, MonadFail m  ) => ConduitT TMMap (TMMapPatch, TMMap) m ()
+refreshRecordsC :: (MonadIO m, MonadReader env m, HasLogFunc env, HasNadeoCoreClient env, HasNadeoTokenState env, HasNadeoLiveClient env, HasNadeoRequestRate env, HasNadeoThrottler env, MonadFail m, HasNadeoAuthToken env) => ConduitT TMMap (TMMapPatch, TMMap) m ()
 refreshRecordsC = do
   mapMC \tmmap -> do
     let mapPatch = defPatch $ _tmm_tmxId tmmap
@@ -81,7 +105,7 @@ chunkedC chnkSize = do
            loop
   loop
 
-loadNadeoMapsInfoC :: (MonadIO m, MonadFail m, MonadReader env m, HasLogFunc env, HasNadeoCoreClient env, HasAppSettings env, HasNadeoTokenState env, HasNadeoLiveClient env, HasNadeoRequestRate env, HasNadeoThrottler env, HasCallStack) => ConduitT TMMap [(TMMapPatch, TMMap)] m ()
+loadNadeoMapsInfoC :: (MonadIO m, MonadFail m, MonadReader env m, HasLogFunc env, HasNadeoCoreClient env, HasNadeoTokenState env, HasNadeoLiveClient env, HasNadeoRequestRate env, HasNadeoThrottler env, HasCallStack, HasNadeoAuthToken env         ) => ConduitT TMMap [(TMMapPatch, TMMap)] m ()
 loadNadeoMapsInfoC = do
   chunkedC 100
     .| mapMC \tmmaps -> do
@@ -110,7 +134,7 @@ loadNadeoMapsInfoC = do
 
 recheckTmxForLatestMissingMaps cnt = recheckTmxForMissingMaps cnt Nothing
 
-recheckTmxForMissingMaps :: (MonadReader env m, HasState env, HasTMXClient env,  HasNadeoLiveClient env, MonadFail m, HasNadeoTokenState env,  HasAppSettings env, HasNadeoCoreClient env, MonadUnliftIO m, HasNadeoRequestRate env, HasNadeoThrottler env, HasLogFunc env) => Int -> Maybe Int -> m (Maybe TMXId)
+recheckTmxForMissingMaps :: (MonadReader env m, HasState env, HasTMXClient env,  HasNadeoLiveClient env, MonadFail m, HasNadeoTokenState env,  HasAppSettings env, HasNadeoCoreClient env, MonadUnliftIO m, HasNadeoRequestRate env, HasNadeoThrottler env, HasLogFunc env, HasNadeoAuthToken env) => Int -> Maybe Int -> m (Maybe TMXId)
 recheckTmxForMissingMaps cnt frm = do
   logError $ "rescanning last " <> displayShow cnt <> " maps from TMX"
   ids <- getAllKnownIds
@@ -152,7 +176,7 @@ pullKnownMaps frm = do
       more <- pullKnownMaps moreIds
       return $ _tmxsr_Results res ++ more
 
-loadNadeoMapsInfo :: (MonadIO m, HasNadeoLiveClient env, MonadReader env m, MonadFail m, HasNadeoTokenState env, HasAppSettings env, HasNadeoCoreClient env, HasNadeoThrottler env, HasNadeoRequestRate env, HasLogFunc env) => [TMMap] -> m [TMMapPatch]
+loadNadeoMapsInfo :: (MonadIO m, HasNadeoLiveClient env, MonadReader env m, MonadFail m, HasNadeoTokenState env, HasNadeoCoreClient env, HasNadeoThrottler env, HasNadeoRequestRate env, HasLogFunc env, HasNadeoAuthToken env) => [TMMap] -> m [TMMapPatch]
 loadNadeoMapsInfo tmmaps = do
   let cnt = length tmmaps
   logInfo $ "Loading info for " <> displayShow cnt <> " maps"
@@ -185,7 +209,7 @@ loadNadeoMapsInfo tmmaps = do
         (concat updates)
   return $ Map.elems xx
 
-refreshRecords :: (MonadIO m, MonadReader env m, HasNadeoLiveClient env, MonadFail m, HasNadeoTokenState env, HasAppSettings env, HasNadeoCoreClient env, HasNadeoThrottler env, HasNadeoRequestRate env, HasLogFunc env) => [TMMap] -> m [TMMapPatch]
+refreshRecords :: (MonadIO m, MonadReader env m, HasNadeoLiveClient env, MonadFail m, HasNadeoTokenState env, HasNadeoCoreClient env, HasNadeoThrottler env, HasNadeoRequestRate env, HasLogFunc env, HasNadeoAuthToken env) => [TMMap] -> m [TMMapPatch]
 refreshRecords maps = do
   start <- liftIO $ getTime Monotonic
   logInfo $ "Refreshing records: " <> displayShow start
@@ -220,7 +244,7 @@ getAllKnownIds = do
   st <- queryAcid GetMapMonitorState
   return $ fromList $ fmap (unTMXId . _tmm_tmxId) $ (Map.elems $ mms_ubeatenMaps st) <> mms_beatenMaps st
 
-collectUnknownMaps :: (MonadReader env m, HasState env, HasNadeoLiveClient env, MonadFail m, HasNadeoTokenState env, HasAppSettings env, HasNadeoCoreClient env, MonadUnliftIO m, HasNadeoRequestRate env, HasNadeoThrottler env, HasLogFunc env) => [TMMap] -> m ()
+collectUnknownMaps :: (MonadReader env m, HasState env, HasNadeoLiveClient env, MonadFail m, HasNadeoTokenState env, HasAppSettings env, HasNadeoCoreClient env, MonadUnliftIO m, HasNadeoRequestRate env, HasNadeoThrottler env, HasLogFunc env, HasNadeoAuthToken env) => [TMMap] -> m ()
 collectUnknownMaps [] = pass
 collectUnknownMaps newMaps = do
   putText $ "Adding new maps: " <> show (length newMaps)
@@ -242,7 +266,7 @@ collectUnknownMaps newMaps = do
 
   refreshBeatenMaps
 
-addMissingMaps :: (MonadReader env m, HasTMXClient env, HasState env, HasNadeoLiveClient env, MonadFail m, HasNadeoTokenState env, HasAppSettings env, HasNadeoCoreClient env, MonadUnliftIO m, HasNadeoRequestRate env, HasNadeoThrottler env, HasLogFunc env) => [Int] -> m ()
+addMissingMaps :: (MonadReader env m, HasTMXClient env, HasState env, HasNadeoLiveClient env, MonadFail m, HasNadeoTokenState env, HasAppSettings env, HasNadeoCoreClient env, MonadUnliftIO m, HasNadeoRequestRate env, HasNadeoThrottler env, HasLogFunc env, HasNadeoAuthToken env) => [Int] -> m ()
 addMissingMaps [] = pass
 addMissingMaps ids = do
   knownIds <- getAllKnownIds
@@ -260,13 +284,13 @@ addMissingMaps ids = do
 
           collectUnknownMaps maps
 
-refreshMissingInfo :: (MonadIO m, MonadFail m, MonadReader env m, HasState env, HasNadeoTokenState env, HasNadeoCoreClient env, HasNadeoLiveClient env, HasAppSettings env, HasNadeoThrottler env, HasNadeoRequestRate env, HasLogFunc env) => m ()
+refreshMissingInfo :: (MonadIO m, MonadFail m, MonadReader env m, HasState env, HasNadeoTokenState env, HasNadeoCoreClient env, HasNadeoLiveClient env, HasNadeoThrottler env, HasNadeoRequestRate env, HasLogFunc env, HasNadeoAuthToken env) => m ()
 refreshMissingInfo = do
   maps <- filter (isNothing . _tmm_authorUid) <$> queryAcid GetMaps
   logInfo $ "Reloading missing info for maps: " <> displayShow (length maps)
   void $ withAcid1 updateMaps =<< loadNadeoMapsInfo maps
 
-refreshRecentUnbeatenMaps :: (MonadIO m, MonadFail m, MonadReader env m, HasState env, HasNadeoTokenState env, HasNadeoCoreClient env, HasNadeoLiveClient env, HasAppSettings env, HasNadeoRequestRate env, HasNadeoThrottler env, HasLogFunc env) => m ()
+refreshRecentUnbeatenMaps :: (MonadIO m, MonadFail m, MonadReader env m, HasState env, HasNadeoTokenState env, HasNadeoCoreClient env, HasNadeoLiveClient env, HasNadeoRequestRate env, HasNadeoThrottler env, HasLogFunc env, HasNadeoAuthToken env) => m ()
 refreshRecentUnbeatenMaps = do
   logInfo "Refreshing records on recently uploaded unbeaten maps"
   now <- getCurrentTime
@@ -280,7 +304,7 @@ refreshRecentUnbeatenMaps = do
 
   refreshBeatenMaps
 
-refreshUnbeatenMaps :: (MonadIO m, MonadFail m, MonadReader env m, HasState env, HasNadeoTokenState env, HasNadeoCoreClient env, HasNadeoLiveClient env, HasAppSettings env, HasNadeoRequestRate env, HasNadeoThrottler env, HasLogFunc env) => m ()
+refreshUnbeatenMaps :: (MonadIO m, MonadFail m, MonadReader env m, HasState env, HasNadeoTokenState env, HasNadeoCoreClient env, HasNadeoLiveClient env, HasNadeoRequestRate env, HasNadeoThrottler env, HasLogFunc env, HasNadeoAuthToken env) => m ()
 refreshUnbeatenMaps = do
   logInfo "Refreshing records on all unbeaten maps"
   maps <- filter (isJust . _tmm_authorUid) <$> queryAcid GetMaps

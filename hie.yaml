@@ -1,5 +1,8 @@
 cradle:
   stack:
+    - path: "./.stack-work"
+      component: "map-monitor:lib"
+
     - path: "./src"
       component: "map-monitor:lib"
 
@@ -12,11 +15,14 @@ cradle:
     - path: "./test"
       component: "map-monitor:test:map-monitor-test"
 
+    - path: "api-integrations/src"
+      component: "api-integrations:lib"
+
     - path: "deps/ixset-typed/src"
       component: "ixset-typed:lib"
 
     - path: "deps/ixset-typed/tests"
       component: "ixset-typed:test:test-ixset-typed"
 
-    - path: "./.stack-work"
-      component: "map-monitor:lib"
+    - path: "pingrpc/src"
+      component: "pingrpc:lib"

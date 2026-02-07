@@ -64,6 +64,9 @@ instance HasState (AcidState MapMonitorState) where
 instance HasNadeoCoreClient AppState where
   nadeoCoreClientL = appState_coreNadeoClient
 
+instance HasNadeoAuthToken AppState where
+  nadeoAuthTokenL = appSettingsL . settings_auth
+
 instance HasXertrovClient AppState where
   xertrovClientL = appState_xertrovClient
 

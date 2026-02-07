@@ -32,17 +32,13 @@ library
   exposed-modules:
       Lib
       MapMonitor.API
-      MapMonitor.API.Nadeo
-      MapMonitor.API.OpenPlanet
-      MapMonitor.API.TMX
-      MapMonitor.API.Util
-      MapMonitor.API.XertroV
       MapMonitor.ATCheck
       MapMonitor.CachedAPIResponses
       MapMonitor.Common
       MapMonitor.DB
       MapMonitor.Integrations
       MapMonitor.MapCache
+      MapMonitor.MissingItemsCheck
       MapMonitor.Server
   other-modules:
       Paths_map_monitor
@@ -66,6 +62,7 @@ library
   build-depends:
       acid-state
     , aeson
+    , api-integrations
     , async
     , async-pool
     , barbies
@@ -85,6 +82,7 @@ library
     , ixset-typed
     , lens
     , network
+    , pingrpc
     , prometheus-client
     , prometheus-metrics-ghc
     , protolude
@@ -133,6 +131,7 @@ executable map-monitor-exe
   build-depends:
       acid-state
     , aeson
+    , api-integrations
     , async
     , async-pool
     , barbies
@@ -153,6 +152,7 @@ executable map-monitor-exe
     , lens
     , map-monitor
     , network
+    , pingrpc
     , prometheus-client
     , prometheus-metrics-ghc
     , protolude
@@ -206,6 +206,7 @@ executable map-monitor-ping-bot-exe
   build-depends:
       acid-state
     , aeson
+    , api-integrations
     , async
     , async-pool
     , barbies
@@ -225,8 +226,8 @@ executable map-monitor-ping-bot-exe
     , http-types
     , ixset-typed
     , lens
-    , map-monitor
     , network
+    , pingrpc
     , prometheus-client
     , prometheus-metrics-ghc
     , protolude
@@ -281,6 +282,7 @@ test-suite map-monitor-test
   build-depends:
       acid-state
     , aeson
+    , api-integrations
     , async
     , async-pool
     , barbies
@@ -301,6 +303,7 @@ test-suite map-monitor-test
     , lens
     , map-monitor
     , network
+    , pingrpc
     , prometheus-client
     , prometheus-metrics-ghc
     , protolude

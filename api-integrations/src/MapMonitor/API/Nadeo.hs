@@ -12,6 +12,7 @@ module MapMonitor.API.Nadeo (
   HasNadeoTokenState (..),
   HasNadeoCoreClient (..),
   HasNadeoLiveClient (..),
+  HasNadeoAuthToken (..),
   NadeoTokenState (..),
   nadeoGetMapLeaderboard,
   nadeoGetMapMultiple,
@@ -34,7 +35,6 @@ import Servant.Client
 import UnliftIO.STM
 import UnliftIO.Concurrent
 import MapMonitor.API.Util
-import MapMonitor.Common
 import Data.Fixed (Pico)
 
 data NadeoTokenState
@@ -77,6 +77,9 @@ class HasNadeoCoreClient env where
 
 class HasNadeoLiveClient env where
   nadeoLiveClientL :: Lens' env ClientEnv
+
+class HasNadeoAuthToken env where
+  nadeoAuthTokenL :: Lens' env Text
 
 data NadeoAuthTokenResponse
   = NadeoAuthTokenResponse
@@ -219,7 +222,7 @@ type LiveServicesNadeoAPI =
              :> Get '[JSON] GetMapMultipleResponse
        )
 
-withAccessToken :: (MonadFail m, MonadIO m, HasNadeoTokenState env, MonadReader env m, HasAppSettings env, HasNadeoCoreClient env, HasNadeoThrottler env, HasNadeoRequestRate env) => (NadeoTokenHeader -> m a) -> m a
+withAccessToken :: (MonadFail m, MonadIO m, HasNadeoTokenState env, MonadReader env m, HasNadeoAuthToken env, HasNadeoCoreClient env, HasNadeoThrottler env, HasNadeoRequestRate env) => (NadeoTokenHeader -> m a) -> m a
 withAccessToken m = do
   tokenStateRef <- view nadeoTokenStateL
   tokenStateM <- atomically $ takeTMVar tokenStateRef
@@ -238,8 +241,8 @@ withAccessToken m = do
   m (NadeoTokenHeader $ _nadeoTokenState_accessToken tokState)
  where
   newToken = do
-    settings <- view appSettingsL
-    accessTokenE <- authorizeNadeo (_settings_auth settings) "NadeoLiveServices"
+    nadeoAuth <- view nadeoAuthTokenL
+    accessTokenE <- authorizeNadeo nadeoAuth "NadeoLiveServices"
     case accessTokenE of
       Left err -> do
         putText $ "Error: " <> show err
@@ -260,13 +263,13 @@ liveServicesNadeoAPI = Proxy
 
 nadeoGetMapLeaderboard' :<|> nadeoGetMapMultiple' = client liveServicesNadeoAPI
 
-nadeoGetMapLeaderboard :: (MonadIO m, MonadReader s m, HasNadeoThrottler s,  HasNadeoRequestRate s, HasNadeoLiveClient s, MonadFail m, HasNadeoTokenState s, HasAppSettings s, HasNadeoCoreClient s) => Text -> Int -> m (Either ClientError GetMapLeaderboardResponse)
+nadeoGetMapLeaderboard :: (MonadIO m, MonadReader s m, HasNadeoThrottler s,  HasNadeoRequestRate s, HasNadeoLiveClient s, MonadFail m, HasNadeoTokenState s, HasNadeoAuthToken s, HasNadeoCoreClient s) => Text -> Int -> m (Either ClientError GetMapLeaderboardResponse)
 nadeoGetMapLeaderboard mapUid count =
   withAccessToken \accessToken -> do
     withThrottler do
       runInClient nadeoLiveClientL $ nadeoGetMapLeaderboard' mapUid accessToken count "true"
 
-nadeoGetMapMultiple :: (MonadIO m, MonadReader s m, HasNadeoThrottler s,  HasNadeoRequestRate s, HasNadeoLiveClient s, MonadFail m, HasNadeoTokenState s, HasAppSettings s, HasNadeoCoreClient s) => IdsList -> m (Either ClientError GetMapMultipleResponse)
+nadeoGetMapMultiple :: (MonadIO m, MonadReader s m, HasNadeoThrottler s,  HasNadeoRequestRate s, HasNadeoLiveClient s, MonadFail m, HasNadeoTokenState s, HasNadeoAuthToken s, HasNadeoCoreClient s) => IdsList -> m (Either ClientError GetMapMultipleResponse)
 nadeoGetMapMultiple ids =
   withAccessToken \accessToken -> do
     withThrottler do

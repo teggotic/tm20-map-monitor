@@ -9,13 +9,11 @@ module MapMonitor.API.TMX (
   TMXSearchMaps (..),
   HasTMXClient (..),
   tmxSearchMaps,
-  tmxMapToTMMap,
 )
 where
 
 import Data.Aeson
 import Data.Aeson.TH
-import MapMonitor.DB
 import Protolude
 import qualified RIO.Text as Text
 import Servant.API
@@ -88,30 +86,6 @@ tmxAPI :: Proxy TMXAPI
 tmxAPI = Proxy
 
 tmxSearchMaps' = client tmxAPI
-
-tmxMapToTMMap :: TMXSearchMapsMap -> TMMap
-tmxMapToTMMap tmx =
-  TMMap
-    { _tmm_tmxId = TMXId $ _tmxsm_MapId tmx
-    , _tmm_uid = _tmxsm_MapUid tmx
-    , _tmm_name = _tmxsm_Name tmx
-    , _tmm_authorMedal = _tmxsm_Author $ _tmxsm_Medals tmx
-    , _tmm_authorUid = Nothing
-    , _tmm_currentWR = Nothing
-    , _tmm_uploadedAt = Nothing
-    , _tmm_tags = _tmxsmt_TagId <$> _tmxsm_Tags tmx
-    , _tmm_hiddenReason = Nothing
-    , _tmm_atSetByPlugin = Nothing
-    , _tmm_nbPlayers = Nothing
-    , _tmm_reportedBy = mempty
-    , _tmm_mapType = case _tmxsm_MapType tmx of
-        "TM_Race" -> Just MT_Race
-        "TM_Royal" -> Just MT_Royal
-        "TM_Stunt" -> Just MT_Stunt
-        "TM_Platform" -> Just MT_Platform
-        "Puzzle" -> Just MT_Puzzle
-        x -> Just $ MT_Other x
-    }
 
 tmxSearchMapsFields :: TMXSearchMapsFields
 tmxSearchMapsFields = TMXSearchMapsFields ["MapId", "MapUid", "Name", "Medals.Author", "Tags", "MapType"]

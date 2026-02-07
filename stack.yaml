@@ -2,6 +2,8 @@ snapshot: lts-24.11
 
 packages:
 - .
+- pingrpc
+- api-integrations
 - deps/ixset-typed
 
 extra-deps:

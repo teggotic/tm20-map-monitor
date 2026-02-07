@@ -1,4 +1,6 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module MapMonitor.Common (
   AppSettings (..),
@@ -10,6 +12,7 @@ module MapMonitor.Common (
   updateAcid,
   withAcid1,
   withAcid2,
+  settings_auth,
 )
 where
 
@@ -35,6 +38,8 @@ data AppSettings
   deriving (Generic, Show)
 
 instance FromDhall AppSettings
+
+$(makeLenses ''AppSettings)
 
 class HasAppSettings env where
   appSettingsL :: Lens' env AppSettings
