@@ -4,6 +4,7 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 module MapMonitor.DB (
   TMMap (..),
@@ -22,6 +23,9 @@ module MapMonitor.DB (
   HideMap (..),
   SetAtSetByPlugin (..),
   RemoveMap (..),
+  IsHidden (..),
+  TMMapIxs,
+  IxEntry,
   reportMap,
   applyPatch,
   defPatch,
@@ -34,6 +38,7 @@ where
 import Data.Acid
 import Data.Acid.Advanced
 import Data.Aeson (FromJSON, ToJSON)
+import Data.IxSet.Typed hiding (fromList)
 import qualified Data.Map as Map
 import Data.SafeCopy
 import Data.Time
@@ -57,7 +62,7 @@ data TMMapRecord
   , _tmmr_time :: !Int
   , _tmmr_timestamp :: !Int
   }
-  deriving (Show)
+  deriving (Show, Eq)
 
 $(deriveSafeCopy 0 'base ''TMMapRecord)
 
@@ -174,7 +179,7 @@ data TMMap
   , _tmm_reportedBy :: !(Map Text (UTCTime, Text))
   , _tmm_mapType :: !(Maybe TMXMapType)
   }
-  deriving (Generic, Show)
+  deriving (Generic, Show, Eq)
 
 instance Migrate TMMap where
   type MigrateFrom TMMap = TMMap_v6
@@ -196,6 +201,20 @@ instance Migrate TMMap where
       }
 
 $(deriveSafeCopy 7 'extension ''TMMap)
+
+newtype IsHidden = IsHidden Bool
+  deriving (Show, Eq, Ord)
+
+instance Ord TMMap where
+  compare = comparing _tmm_tmxId
+
+type TMMapIxs = '[TMXId, IsHidden]
+type IxEntry  = IxSet TMMapIxs TMMap
+
+instance Indexable TMMapIxs TMMap where
+  indices = ixList
+    (ixFun $ \tmMap -> [_tmm_tmxId tmMap])
+    (ixFun $ \tmMap -> [IsHidden $ isJust $ _tmm_hiddenReason tmMap])
 
 data TMMapPatch_v0
   = TMMapPatch_v0
@@ -307,7 +326,7 @@ patchIsEmpty patch =
     , isNothing $ _tmmp_hiddenReason patch
     , isNothing $ _tmmp_atSetByPlugin patch
     , isNothing $ _tmmp_nbPlayers patch
-    , maybe False null $ _tmmp_reportedBy patch
+    , maybe False Protolude.null $ _tmmp_reportedBy patch
     ]
 
 applyPatch :: TMMapPatch -> TMMap -> TMMap
@@ -432,7 +451,7 @@ $(makeAcidic ''MapMonitorState ['updateMaps', 'replaceMap, 'replaceMaps, 'addNew
 updateMaps :: (MonadIO m) => AcidState MapMonitorState -> [TMMapPatch] -> m [TMMap]
 updateMaps acid patches = do
   let maps = filter (not . patchIsEmpty) patches
-  if null maps
+  if Protolude.null maps
     then pass
     else update' acid $ UpdateMaps' maps
   query' acid $ GetMapsByIds (_tmmp_tmxId <$> patches)
