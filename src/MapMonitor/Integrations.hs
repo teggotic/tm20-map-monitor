@@ -66,10 +66,9 @@ iterTmxMaps chnkSize after = do
 
 fullRescan :: (MonadReader env m, HasLogFunc env, HasNadeoCoreClient env, HasNadeoTokenState env, HasNadeoLiveClient env, HasNadeoRequestRate env, HasNadeoThrottler env, HasState env, HasTMXClient env, MonadFail m, MonadUnliftIO m, HasNadeoAuthToken env) => TQueue TMMap -> m ()
 fullRescan checkAtQueue = do
-  ids <- getAllKnownIds
   runConduit $
     iterTmxMaps 200 Nothing
-    .| filterC (\tmmap -> not $ unTMXId (_tmm_tmxId tmmap) `elem` ids)
+    .| filterMC (\tmmap -> not <$> (queryAcid $ IsKnownId (_tmm_tmxId tmmap)))
     .| loadNadeoMapsInfoC
     .| concatC
     .| mapC (uncurry applyPatch)
@@ -141,8 +140,7 @@ recheckTmxForLatestMissingMaps cnt = recheckTmxForMissingMaps cnt Nothing
 recheckTmxForMissingMaps :: (MonadReader env m, HasState env, HasTMXClient env,  HasNadeoLiveClient env, MonadFail m, HasNadeoTokenState env,  HasAppSettings env, HasNadeoCoreClient env, MonadUnliftIO m, HasNadeoRequestRate env, HasNadeoThrottler env, HasLogFunc env, HasNadeoAuthToken env, HasPubRpcSocket env) => Int -> Maybe Int -> m (Maybe TMXId)
 recheckTmxForMissingMaps cnt frm = do
   logError $ "rescanning last " <> displayShow cnt <> " maps from TMX"
-  ids <- getAllKnownIds
-  maps <- runConduit $ iterTmxMaps cnt frm .| takeC cnt .|  filterC (\tmmap -> not $ unTMXId (_tmm_tmxId tmmap) `elem` ids) .| sinkList
+  maps <- runConduit $ iterTmxMaps cnt frm .| takeC cnt .| filterMC (\tmmap -> not <$> (queryAcid $ IsKnownId (_tmm_tmxId tmmap))) .| sinkList
   collectUnknownMaps maps
   return $ _tmm_tmxId <$> lastMay maps
 
@@ -238,29 +236,26 @@ refreshRecords maps = do
 
 refreshBeatenMaps :: ( MonadReader env m, HasState env, HasLogFunc env, MonadUnliftIO m, HasPubRpcSocket env) =>m ()
 refreshBeatenMaps = do
-  beaten <- updateAcid ShuffleBeatenMaps
-  void $ forkIO do
-    forM_ beaten \tmmap -> do
-      case tmmap of
-        TMMap {_tmm_currentWR = Just wr} -> do
-          rpcSend $
-            PMMapBeatenPing $
-              MapBeatenPing
-              { _mbp_tmxId = unTMXId $ _tmm_tmxId tmmap
-              , _mbp_uid = _tmm_uid tmmap
-              , _mbp_authorUid = fromMaybe "" $ _tmm_authorUid tmmap
-              , _mbp_name = _tmm_name tmmap
-              , _mbp_wrHolder = _tmmr_userId wr
-              , _mbp_wrTime = _tmmr_time wr
-              , _mbp_wrTimestamp = posixSecondsToUTCTime $ fromIntegral $ _tmmr_timestamp wr
-              }
-        _ -> logError $ "Got unbeaten map marked as beaten? " <> displayShow tmmap
-  logInfo $ displayShow (length beaten) <> " maps were beaten"
-
-getAllKnownIds :: (MonadReader env m, MonadIO m, HasState env) => m (Set Int)
-getAllKnownIds = do
-  st <- queryAcid GetMapMonitorState
-  return $ fromList $ fmap (unTMXId . _tmm_tmxId) $ (Map.elems $ mms_ubeatenMaps st) <> mms_beatenMaps st
+  -- WTF do I do now xpp
+  pass
+  -- beaten <- updateAcid ShuffleBeatenMaps
+  -- void $ forkIO do
+  --   forM_ beaten \tmmap -> do
+  --     case tmmap of
+  --       TMMap {_tmm_currentWR = Just wr} -> do
+  --         rpcSend $
+  --           PMMapBeatenPing $
+  --             MapBeatenPing
+  --             { _mbp_tmxId = unTMXId $ _tmm_tmxId tmmap
+  --             , _mbp_uid = _tmm_uid tmmap
+  --             , _mbp_authorUid = fromMaybe "" $ _tmm_authorUid tmmap
+  --             , _mbp_name = _tmm_name tmmap
+  --             , _mbp_wrHolder = _tmmr_userId wr
+  --             , _mbp_wrTime = _tmmr_time wr
+  --             , _mbp_wrTimestamp = posixSecondsToUTCTime $ fromIntegral $ _tmmr_timestamp wr
+  --             }
+  --       _ -> logError $ "Got unbeaten map marked as beaten? " <> displayShow tmmap
+  -- logInfo $ displayShow (length beaten) <> " maps were beaten"
 
 collectUnknownMaps :: (MonadReader env m, HasState env, HasNadeoLiveClient env, MonadFail m, HasNadeoTokenState env, HasAppSettings env, HasNadeoCoreClient env, MonadUnliftIO m, HasNadeoRequestRate env, HasNadeoThrottler env, HasLogFunc env, HasNadeoAuthToken env, HasPubRpcSocket env) => [TMMap] -> m ()
 collectUnknownMaps [] = pass
@@ -302,7 +297,7 @@ collectUnknownMaps newMaps = do
 addMissingMaps :: (MonadReader env m, HasTMXClient env, HasState env, HasNadeoLiveClient env, MonadFail m, HasNadeoTokenState env, HasAppSettings env, HasNadeoCoreClient env, MonadUnliftIO m, HasNadeoRequestRate env, HasNadeoThrottler env, HasLogFunc env, HasNadeoAuthToken env, HasPubRpcSocket env) => [Int] -> m ()
 addMissingMaps [] = pass
 addMissingMaps ids = do
-  knownIds <- getAllKnownIds
+  knownIds <- queryAcid GetAllKnownIds
   let newMaps = fromList ids `Set.difference` knownIds
   if null newMaps
     then pass
@@ -355,7 +350,7 @@ refreshNbPlayers = do
         logError $ displayShow (_tmm_tmxId tmmap) <> ": error: " <> displayShow err
       Right res -> do
         logInfo $ displayShow (_tmm_tmxId tmmap) <> ": got nb players: " <> displayShow (_xmpr_nb_players res)
-        updateAcid (ReplaceMap tmmap{_tmm_nbPlayers = Just (_xmpr_nb_players res)})
+        void $ withAcid1 updateMaps [(defPatch (_tmm_tmxId tmmap)) {_tmmp_nbPlayers = Just $ Just (_xmpr_nb_players res)}]
 
 rescanMaps :: (MonadReader env m, HasState env, MonadUnliftIO m, HasAppSettings env, HasLogFunc env, HasPubRpcSocket env) => m ()
 rescanMaps = do

@@ -14,9 +14,6 @@ module MapMonitor.DB (
   TMMapRecord (..),
   MapMonitorState (..),
   AddNewMaps (..),
-  ReplaceMap (..),
-  ReplaceMaps (..),
-  ShuffleBeatenMaps (..),
   GetMaps (..),
   GetBeatenMaps (..),
   GetMapMonitorState (..),
@@ -24,6 +21,9 @@ module MapMonitor.DB (
   SetAtSetByPlugin (..),
   RemoveMap (..),
   IsHidden (..),
+  GetMapById (..),
+  IsKnownId (..),
+  GetAllKnownIds (..),
   TMMapIxs,
   IxEntry,
   reportMap,
@@ -39,7 +39,9 @@ import Data.Acid
 import Data.Acid.Advanced
 import Data.Aeson (FromJSON, ToJSON)
 import Data.IxSet.Typed hiding (fromList)
+import qualified Data.IxSet.Typed as IxSet
 import qualified Data.Map as Map
+import Control.Lens
 import Data.SafeCopy
 import Data.Time
 import GHC.Exts (IsList (fromList))
@@ -202,19 +204,29 @@ instance Migrate TMMap where
 
 $(deriveSafeCopy 7 'extension ''TMMap)
 
+isMapUnbeaten :: TMMap -> Bool
+isMapUnbeaten tmMap =
+  maybe True (\wr -> _tmmr_time wr > _tmm_authorMedal tmMap) (_tmm_currentWR tmMap)
+
 newtype IsHidden = IsHidden Bool
+  deriving (Show, Eq, Ord)
+
+data IsBeaten
+  = Beaten
+  | Unbeaten
   deriving (Show, Eq, Ord)
 
 instance Ord TMMap where
   compare = comparing _tmm_tmxId
 
-type TMMapIxs = '[TMXId, IsHidden]
+type TMMapIxs = '[TMXId, IsHidden, IsBeaten]
 type IxEntry  = IxSet TMMapIxs TMMap
 
-instance Indexable TMMapIxs TMMap where
+instance IxSet.Indexable TMMapIxs TMMap where
   indices = ixList
     (ixFun $ \tmMap -> [_tmm_tmxId tmMap])
     (ixFun $ \tmMap -> [IsHidden $ isJust $ _tmm_hiddenReason tmMap])
+    (ixFun $ \tmMap -> [bool Beaten Unbeaten $ isMapUnbeaten tmMap])
 
 data TMMapPatch_v0
   = TMMapPatch_v0
@@ -359,94 +371,114 @@ data MapMonitorState_v1
 
 $(deriveSafeCopy 1 'base ''MapMonitorState_v1)
 
-data MapMonitorState
-  = MapMonitorState
-  { mms_ubeatenMaps :: !(Map TMXId TMMap)
-  , mms_beatenMaps :: ![TMMap]
+data MapMonitorState_v2
+  = MapMonitorState_v2
+  { v2_mms_ubeatenMaps :: !(Map TMXId TMMap)
+  , v2_mms_beatenMaps :: ![TMMap]
   }
   deriving (Show)
 
-instance Migrate MapMonitorState where
-  type MigrateFrom MapMonitorState = MapMonitorState_v1
-  migrate (MapMonitorState_v1 _ maps beatenMaps) =
-    MapMonitorState
-      { mms_ubeatenMaps = Map.fromList $ map (\(tmxId, tmMap) -> (TMXId tmxId, tmMap)) $ Map.toList maps
-      , mms_beatenMaps = beatenMaps
+instance Migrate MapMonitorState_v2 where
+  type MigrateFrom MapMonitorState_v2 = MapMonitorState_v1
+  migrate (MapMonitorState_v1 {..}) =
+    MapMonitorState_v2
+      { v2_mms_ubeatenMaps = Map.fromList $ map (\(tmxId, tmMap) -> (TMXId tmxId, tmMap)) $ Map.toList v1_mms_ubeatenMaps
+      , v2_mms_beatenMaps = v1_mms_beatenMaps
       }
 
-$(deriveSafeCopy 2 'extension ''MapMonitorState)
+$(deriveSafeCopy 2 'extension ''MapMonitorState_v2)
+
+data MapMonitorState
+  = MapMonitorState
+  { _mms_maps :: IxEntry
+  }
+  deriving (Show)
+
+$(makeLenses ''MapMonitorState)
+
+instance Migrate MapMonitorState where
+  type MigrateFrom MapMonitorState = MapMonitorState_v2
+  migrate (MapMonitorState_v2 {..}) =
+    MapMonitorState
+      { _mms_maps = IxSet.fromList (v2_mms_beatenMaps ++ Map.elems v2_mms_ubeatenMaps)
+      }
+
+$(deriveSafeCopy 3 'extension ''MapMonitorState)
+
+patchDB :: [TMMapPatch] -> IxEntry -> IxEntry
+patchDB patches db =
+  foldl' go db patches
+  where
+    go acc p =
+      case getOne (acc @= _tmmp_tmxId p) of
+        Nothing -> acc
+        Just m -> IxSet.updateIx (_tmmp_tmxId p) (applyPatch p m) acc
+
+addMissingMaps :: [TMMap] -> IxEntry -> IxEntry
+addMissingMaps maps db =
+  foldl' go db maps
+  where
+    go acc m =
+      case getOne (acc @= _tmm_tmxId m) of
+        Nothing -> IxSet.insert m acc
+        Just _ -> acc
 
 addNewMaps :: [(TMXId, TMMap)] -> Update MapMonitorState ()
 addNewMaps maps = do
-  modify $ \s -> s{mms_ubeatenMaps = mms_ubeatenMaps s <> fromList maps}
+  mms_maps %= addMissingMaps (snd <$> maps)
 
 updateMaps' :: [TMMapPatch] -> Update MapMonitorState ()
 updateMaps' patches = do
-  modify $ \s ->
-    s
-      { mms_ubeatenMaps =
-          foldl
-            (\maps patch -> Map.adjust (applyPatch patch) (_tmmp_tmxId patch) maps)
-            (mms_ubeatenMaps s)
-            patches
-      }
+  mms_maps %= patchDB patches
 
 removeMap :: TMXId -> Update MapMonitorState ()
 removeMap tmxId = do
-  modify $ \s -> s{mms_ubeatenMaps = Map.delete tmxId $ mms_ubeatenMaps s}
+  mms_maps %= IxSet.deleteIx tmxId
 
 replaceMaps :: [TMMap] -> Update MapMonitorState ()
 replaceMaps mps = do
-  let maps = fromList (zip (_tmm_tmxId <$> mps) mps)
-  modify $ \s -> s{mms_ubeatenMaps = maps `Map.union` mms_ubeatenMaps s}
+  mms_maps %= \db -> foldl' (\acc m -> IxSet.insert m acc) db mps
 
 replaceMap :: TMMap -> Update MapMonitorState ()
 replaceMap tmMap = do
-  modify $ \s -> s{mms_ubeatenMaps = Map.insert (_tmm_tmxId tmMap) tmMap $ mms_ubeatenMaps s}
+  mms_maps %= \db -> IxSet.insert tmMap db
 
-isMapUnbeaten :: TMMap -> Bool
-isMapUnbeaten tmMap =
-  maybe True (\wr -> _tmmr_time wr > _tmm_authorMedal tmMap) (_tmm_currentWR tmMap)
+getAllKnownIds :: Query MapMonitorState (Set Int)
+getAllKnownIds = do
+  asks $ fromList . fmap (unTMXId . _tmm_tmxId) . IxSet.toList . _mms_maps
 
-shuffleBeatenMaps :: Update MapMonitorState [TMMap]
-shuffleBeatenMaps = do
-  st <- get
-  let
-    (unbeaten, beaten) =
-      Map.partition
-        isMapUnbeaten
-        (mms_ubeatenMaps st)
-  put $
-    MapMonitorState
-      { mms_ubeatenMaps = unbeaten
-      , mms_beatenMaps = Map.elems beaten <> mms_beatenMaps st
-      }
-  return $ Map.elems beaten
+isKnownId :: TMXId -> Query MapMonitorState Bool
+isKnownId tmxId = do
+  asks $ isJust . getOne . (@= tmxId) . _mms_maps
+
+getMapById :: TMXId -> Query MapMonitorState (Maybe TMMap)
+getMapById tmxId = do
+  asks $ getOne . (@= tmxId) . _mms_maps
 
 getMapsByIds :: [TMXId] -> Query MapMonitorState [TMMap]
 getMapsByIds ids = do
-  asks $ (\m -> catMaybes [Map.lookup k m | k <- ids]) . mms_ubeatenMaps
+  asks $ IxSet.toList . (@* ids) . _mms_maps
 
 getMaps :: Query MapMonitorState [TMMap]
 getMaps = do
-  asks $ Map.elems . mms_ubeatenMaps
+  asks $ IxSet.toList . (@= Unbeaten) . _mms_maps
 
 getBeatenMaps :: Query MapMonitorState [TMMap]
 getBeatenMaps = do
-  asks $ mms_beatenMaps
+  asks $ IxSet.toList . (@= Beaten) . _mms_maps
 
 getMapMonitorState :: Query MapMonitorState MapMonitorState
 getMapMonitorState = ask
 
 hideMap :: TMXId -> Text -> Update MapMonitorState ()
 hideMap tmxId reason = do
-  modify $ \s -> s{mms_ubeatenMaps = Map.adjust (\tmmap -> tmmap{_tmm_hiddenReason = Just reason}) tmxId $ mms_ubeatenMaps s}
+  updateMaps' [(defPatch tmxId) { _tmmp_hiddenReason = Just $ Just reason }]
 
 setAtSetByPlugin :: TMXId -> Maybe Bool -> Update MapMonitorState ()
 setAtSetByPlugin tmxId atSetByPlugin = do
-  modify $ \s -> s{mms_ubeatenMaps = Map.adjust (\tmmap -> tmmap{_tmm_atSetByPlugin = atSetByPlugin}) tmxId $ mms_ubeatenMaps s}
+  updateMaps' [(defPatch tmxId) { _tmmp_atSetByPlugin = Just $ atSetByPlugin }]
 
-$(makeAcidic ''MapMonitorState ['updateMaps', 'replaceMap, 'replaceMaps, 'addNewMaps, 'getMaps, 'getBeatenMaps, 'shuffleBeatenMaps, 'getMapMonitorState, 'hideMap, 'setAtSetByPlugin, 'getMapsByIds, 'removeMap])
+$(makeAcidic ''MapMonitorState ['updateMaps', 'replaceMap, 'replaceMaps, 'addNewMaps, 'getMaps, 'getBeatenMaps, 'getMapMonitorState, 'hideMap, 'setAtSetByPlugin, 'getMapsByIds, 'removeMap, 'getMapById, 'isKnownId, 'getAllKnownIds])
 
 updateMaps :: (MonadIO m) => AcidState MapMonitorState -> [TMMapPatch] -> m [TMMap]
 updateMaps acid patches = do
