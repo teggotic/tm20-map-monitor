@@ -1,11 +1,9 @@
 module Main (main) where
 
-import Control.Lens
 import Lib
 import Data.Acid
 import Data.Acid.Remote (acidServer, skipAuthenticationCheck)
 import Data.Default
-import MapMonitor.Common
 import Data.Either.Combinators
 import MapMonitor.DB
 import MapMonitor.Integrations
@@ -24,8 +22,6 @@ import UnliftIO.Exception (tryAny)
 import UnliftIO.STM
 
 import Options.Applicative
-import Control.Monad.Logger (runStdoutLoggingT)
-import PingRPC
 
 data Options
   = Options
@@ -40,7 +36,7 @@ main :: (MonadUnliftIO m, MonadFail m) => m ()
 main = do
   opts <- liftIO $ execParser $ info (optsP <**> helper) mempty
 
-  acid <- liftIO $ openLocalState (MapMonitorState mempty mempty)
+  acid <- liftIO $ openLocalState (MapMonitorState mempty)
   -- liftIO $ createCheckpoint acid
   -- liftIO $ createArchive acid
   unbeatenAtsCache <- flip runReaderT acid $ do

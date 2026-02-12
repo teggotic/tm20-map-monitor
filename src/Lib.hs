@@ -100,6 +100,6 @@ runRemotely port m = do
 runLocally :: (MonadUnliftIO m) => ReaderT AppState m c -> m c
 runLocally m = do
   bracket
-    (liftIO $ openLocalState (MapMonitorState mempty mempty))
+    (liftIO $ openLocalState (MapMonitorState mempty))
     (liftIO . closeAcidState)
     (\acid -> runTemporary acid m)
