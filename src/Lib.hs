@@ -25,8 +25,8 @@ import System.Directory (doesFileExist)
 import RIO.Time (getCurrentTime)
 import PingRPC (withPubSocket)
 
-runInApp :: (MonadUnliftIO m) => TVar UnbeatenAtsResponse -> TVar RecentlyBeatenAtsResponse -> AcidState MapMonitorState -> ReaderT AppState m b -> m b
-runInApp unbeatenAtsCache beatenAtsCache acid m = do
+runInApp :: (MonadUnliftIO m) => TVar UnbeatenAtsResponse -> TVar RecentlyBeatenAtsResponse -> AcidState MapMonitorState -> TQueue TMMap -> ReaderT AppState m b -> m b
+runInApp unbeatenAtsCache beatenAtsCache acid checkMapFileQueue m = do
   settings <- liftIO $ input auto "./settings.dhall"
   jwtAccessKey <- liftIO $
     (doesFileExist "/tmp/jwt-access-key.secret") >>= Protolude.bool generateKey (readKey "/tmp/jwt-access-key.secret")
@@ -72,6 +72,7 @@ runInApp unbeatenAtsCache beatenAtsCache acid m = do
                   , _appState_nadeoRequestRate = 0.5
                   , _appState_logFunc = logFunc
                   , _appState_pubSocket = sock
+                  , _appState_checkMapFileQueue = checkMapFileQueue
                   }
           runReaderT m appState
 
@@ -88,7 +89,8 @@ runTemporary acid m = do
     collectUnbeatenAtsResponse >>= liftIO . newTVarIO
   beatenAtsCache <- flip runReaderT acid $ do
     collectBeatenAtsResponse >>= liftIO . newTVarIO
-  runInApp unbeatenAtsCache beatenAtsCache acid m
+  x <- newTQueueIO
+  runInApp unbeatenAtsCache beatenAtsCache acid x m
 
 runRemotely :: (MonadUnliftIO m) => PortNumber -> ReaderT AppState m c -> m c
 runRemotely port m = do

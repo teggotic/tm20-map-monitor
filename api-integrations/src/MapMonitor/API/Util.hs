@@ -8,9 +8,10 @@ import Servant.Client
 import UnliftIO.Retry
 import Control.Lens
 import Network.HTTP.Types.Status
+import RIO (logError, HasLogFunc, displayShow)
 
 
-runInClient :: (MonadReader s m, MonadIO m) => Getting ClientEnv s ClientEnv -> ClientM b -> m (Either ClientError b)
+runInClient :: (MonadReader s m, MonadIO m, HasLogFunc s) => Getting ClientEnv s ClientEnv -> ClientM b -> m (Either ClientError b)
 runInClient getEnv m = do
   env <- view getEnv
   retrying
@@ -18,7 +19,9 @@ runInClient getEnv m = do
     (const $ \case
       Right _ -> return False
       Left (FailureResponse _ ((responseStatusCode) -> (statusCode -> 404))) -> return False
-      Left e -> return True
+      Left e -> do
+        logError $ "Error: " <> displayShow e
+        return True
     )
     \_ -> do
       liftIO $ runClientM m env

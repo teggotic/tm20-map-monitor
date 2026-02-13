@@ -126,7 +126,7 @@ coreNadeoAPI = Proxy
 
 authorizeNadeo' :<|> refreshTokenNadeo' = client coreNadeoAPI
 
-authorizeNadeo :: (MonadIO m, MonadReader env m, HasNadeoCoreClient env, HasNadeoThrottler env, HasNadeoRequestRate env)
+authorizeNadeo :: (MonadIO m, MonadReader env m, HasNadeoCoreClient env, HasNadeoThrottler env, HasNadeoRequestRate env, HasLogFunc env)
                => Text
                -> Text
                -> m (Either ClientError NadeoAuthTokenResponse)

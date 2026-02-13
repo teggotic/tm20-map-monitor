@@ -45,7 +45,9 @@ main = do
   beatenAtsCache <- flip runReaderT acid $ do
     collectBeatenAtsResponse >>= liftIO . newTVarIO
 
-  runInApp unbeatenAtsCache beatenAtsCache acid $ do
+  checkMapFileQueue <- newTQueueIO
+
+  runInApp unbeatenAtsCache beatenAtsCache acid checkMapFileQueue $ do
     -- _ <- forkIO $ forever do
     --   processAtCheckQueue checkAtQueue
     _ <- forkIO $ do
@@ -65,8 +67,8 @@ main = do
                     then refreshRecentUnbeatenMaps
                     else pass
             if i `mod` 24 * 60 == 0
-               then Protolude.void $ recheckTmxForLatestMissingMaps 1000
-               else Protolude.void $ recheckTmxForLatestMissingMaps 80
+               then Protolude.void $ scanTmx (Just 1000)
+               else Protolude.void $ scanTmx (Just 80)
 
           whenLeft res $ \err ->
             logError $ "Exception happened: " <> displayShow err
