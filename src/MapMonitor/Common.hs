@@ -9,6 +9,7 @@ module MapMonitor.Common (
   HasUnbeatenAtsCache (..),
   HasBeatenAtsCache (..),
   HasBeatenMapPings (..),
+  HasCheckMapFileQueue (..),
   queryAcid,
   updateAcid,
   withAcid1,
@@ -57,6 +58,9 @@ class HasBeatenAtsCache env where
 
 class HasBeatenMapPings env where
   beatenMapPingsL :: Lens' env (TQueue PingRPCMessage)
+
+class HasCheckMapFileQueue env where
+  checkMapFileQueueL :: Lens' env (TQueue TMMap)
 
 queryAcid q =
   view stateL >>= flip query' q

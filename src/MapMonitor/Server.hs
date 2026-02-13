@@ -15,7 +15,7 @@ import MapMonitor.API.OpenPlanet
 import MapMonitor.CachedAPIResponses
 import MapMonitor.Common
 import MapMonitor.DB
-import MapMonitor.Integrations (addMissingMaps)
+import MapMonitor.Integrations
 import qualified Network.HTTP.Types as H
 import Network.Wai as Wai
 import PingRPC
@@ -52,6 +52,7 @@ data AppState
   , _appState_nadeoRequestRate :: !Pico
   , _appState_logFunc :: !LogFunc
   , _appState_pubSocket :: !(ZMQ.Socket ZMQ.Pub)
+  , _appState_checkMapFileQueue :: !(TQueue TMMap)
   }
 
 $(makeLenses ''AppState)
@@ -103,6 +104,9 @@ instance HasLogFunc AppState where
 
 instance HasPubRpcSocket AppState where
   pubRpcSocketL = appState_pubSocket
+
+instance HasCheckMapFileQueue AppState where
+  checkMapFileQueueL = appState_checkMapFileQueue
 
 type AppM = ReaderT AppState Servant.Server.Handler
 
