@@ -33,6 +33,7 @@ import MapMonitor.API.XertroV
 import MapMonitor.API.TMX
 import MapMonitor.API.Util
 import Data.Fixed
+import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 
 data AppState
   = AppState
@@ -262,11 +263,12 @@ collectUnbeatenAtsResponse = do
         , fromMaybe "" (_tmm_hiddenReason tmmap)
         , fromMaybe False (_tmm_atSetByPlugin tmmap)
         , (\(k, (_, r)) -> (k, r)) <$> Map.assocs (_tmm_reportedBy tmmap)
+        , maybe 0 (nominalDiffTimeToSeconds . utcTimeToPOSIXSeconds) (_tmm_uploadedAt tmmap)
         )
 
   return $
     UnbeatenAtsResponse
-      { _uar_keys = ["TrackID", "TrackUID", "Track_Name", "AuthorLogin", "Tags", "MapType", "AuthorTime", "WR", "LastChecked", "NbPlayers", "IsHidden", "Reason", "AtSetByPlugin", "Reported"]
+      { _uar_keys = ["TrackID", "TrackUID", "Track_Name", "AuthorLogin", "Tags", "MapType", "AuthorTime", "WR", "LastChecked", "NbPlayers", "IsHidden", "Reason", "AtSetByPlugin", "Reported", "UploadedTimestamp"]
       , _uar_tracks = unbeatenMaps
       , _uar_nbTracks = length unbeatenMaps
       }
