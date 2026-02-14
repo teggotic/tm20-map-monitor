@@ -184,7 +184,7 @@ executable map-monitor-exe
   default-language: Haskell2010
   if flag(static)
     ghc-options: -threaded -rtsopts -with-rtsopts=-N -optc-Os -optl=-pthread -optl=-static -fPIC
-    ld-options: -static
+    ld-options: -static -pthread -lstdc++ -lsodium
   else
     ghc-options: -threaded -rtsopts -with-rtsopts=-N
 
@@ -262,7 +262,7 @@ executable map-monitor-ping-bot-exe
   default-language: Haskell2010
   if flag(static)
     ghc-options: -threaded -rtsopts -with-rtsopts=-N -optc-Os -optl=-pthread -optl=-static -fPIC
-    ld-options: -static
+    ld-options: -static -pthread -lstdc++ -lsodium
   else
     ghc-options: -threaded -rtsopts -with-rtsopts=-N
 
@@ -339,7 +339,7 @@ executable map-monitor-zmq-exe
   default-language: Haskell2010
   if flag(static)
     ghc-options: -threaded -rtsopts -with-rtsopts=-N -optc-Os -optl=-pthread -optl=-static -fPIC
-    ld-options: -static
+    ld-options: -static -pthread -lstdc++ -lsodium
   else
     ghc-options: -threaded -rtsopts -with-rtsopts=-N
 
