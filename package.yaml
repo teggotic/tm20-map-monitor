@@ -109,7 +109,11 @@ executables:
     when:
       - condition: flag(static)
         then:
-          ld-options: -static
+          ld-options:
+          - -static
+          - -pthread
+          - -lstdc++
+          - -lsodium
           ghc-options:
             - -threaded
             - -rtsopts
@@ -132,7 +136,11 @@ executables:
     when:
       - condition: flag(static)
         then:
-          ld-options: -static
+          ld-options:
+          - -static
+          - -pthread
+          - -lstdc++
+          - -lsodium
           ghc-options:
             - -threaded
             - -rtsopts
@@ -156,7 +164,11 @@ executables:
     when:
       - condition: flag(static)
         then:
-          ld-options: -static
+          ld-options:
+          - -static
+          - -pthread
+          - -lstdc++
+          - -lsodium
           ghc-options:
             - -threaded
             - -rtsopts

@@ -63,7 +63,7 @@ RUN echo "Downloading and installing stack" &&\
     ghcup install stack ${STACK_VERSION}
 
 # NOTE: 'stack --docker' needs bash + usermod/groupmod (from shadow)
-RUN apk add --no-cache bash shadow openssh-client tar gmp gmp-dev binutils-gold ncurses-dev ncurses zlib zlib-dev ncurses-static zlib-static g++
+RUN apk add --no-cache bash shadow openssh-client tar gmp gmp-dev binutils-gold ncurses-dev ncurses zlib zlib-dev ncurses-static zlib-static g++ libzmq-static libzmq zeromq zeromq-dev libsodium-static
 
 RUN ghcup set ghc ${GHC_VERSION} \
     && stack config set system-ghc --global true
