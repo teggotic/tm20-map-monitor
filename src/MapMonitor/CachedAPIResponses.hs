@@ -15,8 +15,9 @@ import Data.Aeson.TH
 import MapMonitor.DB
 import RIO.List
 import RIO.Prelude.Types
+import Data.Fixed
 
-type UnbeatenAtTrack = (TMXId, Text, Text, Text, Text, Text, Int, Int, Double, Int, Bool, Text, Bool, [(Text, Text)])
+type UnbeatenAtTrack = (TMXId, Text, Text, Text, Text, Text, Int, Int, Double, Int, Bool, Text, Bool, [(Text, Text)], Pico)
 
 data UnbeatenAtsResponse
   = UnbeatenAtsResponse
