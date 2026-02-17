@@ -24,6 +24,7 @@ import RIO (logInfo, HasLogFunc, displayShow, logError, logSticky, logStickyDone
 import Data.Conduit.TQueue (sinkTQueue)
 import Control.Lens
 import MapMonitor.MissingItemsCheck
+import PingRPC
 
 tmxMapToTMMap :: TMXSearchMapsMap -> TMMap
 tmxMapToTMMap tmx =
@@ -285,41 +286,30 @@ refreshNbPlayers = do
 
 rescanMaps :: (MonadReader env m, HasState env, MonadUnliftIO m, HasAppSettings env, HasLogFunc env) => m ()
 rescanMaps = do
-  maps <- filter (isNothing . _tmm_hiddenReason) <$> queryAcid GetMaps
-  pooledForConcurrentlyN_ 10 (zip [(1 :: Int) ..] maps) $ \(i, tmmap) -> do
-    logSticky $ "Checking map #" <> displayShow i <> "/" <> displayShow (length maps) <> ": " <> displayShow (_tmm_tmxId tmmap)
-    -- case tmmap of
-    --   TMMap{_tmm_atSetByPlugin = Nothing, _tmm_tmxId = tmxId} -> do
-    --     atSetByPlugin <- checkAtSetByPlugin $ unTMXId tmxId
-    --     logInfo $ "Checking AT set by plugin for map " <> displayShow tmxId <> ": " <> displayShow atSetByPlugin
-    --     if isJust atSetByPlugin
-    --       then updateAcid (SetAtSetByPlugin tmxId atSetByPlugin)
-    --       else pass
-    --   _ -> pass
-  -- forM_ unbeatenMaps $ \tmmap -> do
-    checkMissingItems (unTMXId $ _tmm_tmxId tmmap)
-      >>= \case
-        Just MissingItems -> do
-          logStickyDone $ "Checking map #" <> displayShow i <> "/" <> displayShow (length maps) <> ": " <> displayShow (_tmm_tmxId tmmap)
-          putText $ "Missing items detected for map " <> show (_tmm_tmxId tmmap)
-          updateAcid $ HideMap (_tmm_tmxId tmmap) "Missing items detected by automatic check"
-          -- q <- view beatenMapPingsL
-          -- atomically $ writeTQueue q $
-          --   PMMissingItemsMapDetectedPing $
-          --     MissingItemsMapDetectedPing
-          --       { _mimdp_tmxId = unTMXId $ _tmm_tmxId tmmap
-          --       , _mimdp_uid = _tmm_uid tmmap
-          --       , _mimdp_name = _tmm_name tmmap
-          --       , _mimdp_authorUid = fromMaybe "" $ _tmm_authorUid tmmap
-          --       }
-        _ -> pass
+  maps <- filter (\x -> and [isNothing $ _tmm_atSetByPlugin x, isNothing $ _tmm_hiddenReason x]) <$> filterMaps ((@= HasNadeoInfo True) . (@= Unbeaten))
+  print maps
 
-processAtCheckQueue :: (MonadUnliftIO m, MonadReader env m, HasAppSettings env,  HasLogFunc env, HasState env) => TQueue TMMap -> m ()
-processAtCheckQueue queue = do
+processMapFileQueue :: (MonadUnliftIO m, MonadReader env m, HasAppSettings env,  HasLogFunc env, HasState env, HasPubRpcSocket env) => TQueue TMMap -> m ()
+processMapFileQueue queue = do
   atomically (readTQueue queue) >>= \tmmap -> do
     atSetByPlugin <- checkAtSetByPlugin (unTMXId $ _tmm_tmxId tmmap)
     logInfo $ "Checking AT set by plugin for map #" <> displayShow (unTMXId $ _tmm_tmxId tmmap) <> ": " <> displayShow atSetByPlugin
     Protolude.void $ withAcid1 updateMaps $ [(defPatch $ _tmm_tmxId tmmap){_tmmp_atSetByPlugin = Just atSetByPlugin}]
+
+    checkMissingItems (unTMXId $ _tmm_tmxId tmmap)
+      >>= \case
+        Just MissingItems -> do
+          putText $ "Missing items detected for map " <> show (_tmm_tmxId tmmap)
+          updateAcid $ HideMap (_tmm_tmxId tmmap) "Missing items detected by automatic check"
+          rpcSend $
+            PMMissingItemsMapDetectedPing $
+              MissingItemsMapDetectedPing
+                { _mimdp_tmxId = unTMXId $ _tmm_tmxId tmmap
+                , _mimdp_uid = _tmm_uid tmmap
+                , _mimdp_name = _tmm_name tmmap
+                , _mimdp_authorUid = fromMaybe "" $ _tmm_authorUid tmmap
+                }
+        _ -> pass
 
 filterMaps :: (MonadIO m, MonadReader env m, HasState env) => (IxEntry -> IxEntry) -> m [TMMap]
 filterMaps f = do

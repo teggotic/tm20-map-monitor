@@ -78,7 +78,7 @@ $(deriveSafeCopy 0 'base ''TMMapRecord)
 newtype TMXId
   = TMXId {unTMXId :: Int}
   deriving (Show, Eq, Ord)
-  deriving newtype (ToJSON, FromJSON)
+  deriving newtype (ToJSON, FromJSON, Num)
 
 $(deriveSafeCopy 0 'base ''TMXId)
 
@@ -581,11 +581,11 @@ getMapsByIds ids = do
 
 getMaps :: Query MapMonitorState [TMMap]
 getMaps = do
-  asks $ IxSet.toList . (@= (HiddenOnTmx False)) . (@= (TrackType $ Just MT_Race)) . (@= Unbeaten) . _mms_maps
+  asks $ IxSet.toList . (@= (HiddenOnTmx False)) . (@= HasNadeoInfo True) . (@= (TrackType $ Just MT_Race)) . (@= Unbeaten) . _mms_maps
 
 getBeatenMaps :: Query MapMonitorState [TMMap]
 getBeatenMaps = do
-  asks $ IxSet.toList . (@= (HiddenOnTmx False)) . (@= (TrackType $ Just MT_Race)) . (@= Beaten) . _mms_maps
+  asks $ IxSet.toList . (@= (HiddenOnTmx False)) . (@= HasNadeoInfo True) . (@= (TrackType $ Just MT_Race)) . (@= Beaten) . _mms_maps
 
 getMapMonitorState :: Query MapMonitorState MapMonitorState
 getMapMonitorState = ask
@@ -603,9 +603,7 @@ $(makeAcidic ''MapMonitorState ['updateMaps', 'replaceMap, 'replaceMaps, 'addNew
 updateMaps :: (MonadIO m) => AcidState MapMonitorState -> [TMMapPatch] -> m [TMMap]
 updateMaps _    [] = return []
 updateMaps acid patches = do
-  putText $ "Updating " <> show (length patches) <> " maps"
   let maps = filter (not . patchIsEmpty) patches
-  putText $ "maps: " <> show (length maps)
   if Protolude.null maps
     then pass
     else update' acid $ UpdateMaps' maps

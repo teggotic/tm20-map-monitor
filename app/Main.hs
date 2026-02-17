@@ -48,8 +48,9 @@ main = do
   checkMapFileQueue <- newTQueueIO
 
   runInApp unbeatenAtsCache beatenAtsCache acid checkMapFileQueue $ do
-    -- _ <- forkIO $ forever do
-    --   processAtCheckQueue checkAtQueue
+    _ <- forkIO $ forever do
+      processMapFileQueue checkMapFileQueue
+
     _ <- forkIO $ do
       liftIO $ acidServer skipAuthenticationCheck 8082 acid
 
