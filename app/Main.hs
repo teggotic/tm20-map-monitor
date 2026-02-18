@@ -1,9 +1,10 @@
+{-# LANGUAGE NoImplicitPrelude #-}
 module Main (main) where
 
 import Lib
 import Data.Acid
 import Data.Acid.Remote (acidServer, skipAuthenticationCheck)
-import Data.Default
+import Data.Default.Class
 import Data.Either.Combinators
 import MapMonitor.DB
 import MapMonitor.Integrations

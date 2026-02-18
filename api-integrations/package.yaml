@@ -26,7 +26,6 @@ dependencies:
 
 default-extensions:
 - LambdaCase
-- NoImplicitPrelude
 - OverloadedStrings
 - TypeApplications
 - FlexibleContexts

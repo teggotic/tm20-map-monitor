@@ -34,7 +34,6 @@ library
       src
   default-extensions:
       LambdaCase
-      NoImplicitPrelude
       OverloadedStrings
       TypeApplications
       FlexibleContexts

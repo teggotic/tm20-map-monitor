@@ -1,16 +1,17 @@
 snapshot: lts-24.11
 
 packages:
-- .
-- pingrpc
-- api-integrations
-- deps/ixset-typed
+  - .
+  - pingrpc
+  - api-integrations
+  - deps/ixset-typed
 
 extra-deps:
-- discord-haskell-1.18.0@sha256:0b88b1c391542b36243647f3533261867a1bd59cb2194519bc4b0e45b9a73797,7032
+  - git: https://github.com/minio/minio-hs.git
+    commit: '3e665784228cba7261560c104b8f1d928e7b5bd4'
+  - discord-haskell-1.18.0@sha256:0b88b1c391542b36243647f3533261867a1bd59cb2194519bc4b0e45b9a73797,7032
 
 docker:
   enable: false
   image: "alpine-ghc-9.10.2:latest"
   stack-exe: image
-

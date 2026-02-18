@@ -1,3 +1,4 @@
+{-# LANGUAGE NoImplicitPrelude #-}
 module MapMonitor.API.Util
   ( runInClient
   )

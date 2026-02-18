@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE StandaloneDeriving #-}
@@ -16,7 +17,6 @@ module MapMonitor.DB (
   AddNewMaps (..),
   AddNewMaps' (..),
   GetMaps (..),
-  GetBeatenMaps (..),
   GetMapMonitorState (..),
   HideMap (..),
   SetAtSetByPlugin (..),
@@ -30,6 +30,7 @@ module MapMonitor.DB (
   TrackType (..),
   IsBeaten (..),
   HasNadeoInfo (..),
+  WrTimestamp (..),
   TMMapIxs,
   IxEntry,
   reportMap,
@@ -53,6 +54,7 @@ import Data.SafeCopy
 import Data.Time
 import GHC.Exts (IsList (fromList))
 import Protolude
+import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 
 data TMXMapType
   = MT_Race
@@ -277,7 +279,10 @@ newtype UploadedAt = UploadedAt UTCTime
 newtype HasNadeoInfo = HasNadeoInfo Bool
   deriving (Show, Eq, Ord)
 
-type TMMapIxs = '[TMXId, IsBeaten, TrackType, HiddenOnTmx, UploadedAt, HasNadeoInfo]
+newtype WrTimestamp = WrTimestamp UTCTime
+  deriving (Show, Eq, Ord)
+
+type TMMapIxs = '[TMXId, IsBeaten, TrackType, HiddenOnTmx, UploadedAt, HasNadeoInfo, WrTimestamp]
 type IxEntry  = IxSet TMMapIxs TMMap
 
 instance IxSet.Indexable TMMapIxs TMMap where
@@ -288,6 +293,7 @@ instance IxSet.Indexable TMMapIxs TMMap where
     (ixFun $ \tmMap -> [HiddenOnTmx $ _tmm_hiddenOnTmx tmMap])
     (ixFun $ \tmMap -> catMaybes [UploadedAt <$> _tmm_uploadedAt tmMap])
     (ixFun $ \tmMap -> [HasNadeoInfo $ isJust $ _tmm_authorUid tmMap])
+    (ixFun $ \tmMap -> maybe [] (pure . WrTimestamp . posixSecondsToUTCTime . secondsToNominalDiffTime . fromIntegral .  _tmmr_timestamp) $ _tmm_currentWR tmMap)
 
 data TMMapPatch_v0
   = TMMapPatch_v0
@@ -583,10 +589,6 @@ getMaps :: Query MapMonitorState [TMMap]
 getMaps = do
   asks $ IxSet.toList . (@= (HiddenOnTmx False)) . (@= HasNadeoInfo True) . (@= (TrackType $ Just MT_Race)) . (@= Unbeaten) . _mms_maps
 
-getBeatenMaps :: Query MapMonitorState [TMMap]
-getBeatenMaps = do
-  asks $ IxSet.toList . (@= (HiddenOnTmx False)) . (@= HasNadeoInfo True) . (@= (TrackType $ Just MT_Race)) . (@= Beaten) . _mms_maps
-
 getMapMonitorState :: Query MapMonitorState MapMonitorState
 getMapMonitorState = ask
 
@@ -598,7 +600,7 @@ setAtSetByPlugin :: TMXId -> Maybe Bool -> Update MapMonitorState ()
 setAtSetByPlugin tmxId atSetByPlugin = do
   updateMaps' [(defPatch tmxId) { _tmmp_atSetByPlugin = Just $ atSetByPlugin }]
 
-$(makeAcidic ''MapMonitorState ['updateMaps', 'replaceMap, 'replaceMaps, 'addNewMaps, 'addNewMaps', 'getMaps, 'getBeatenMaps, 'getMapMonitorState, 'hideMap, 'setAtSetByPlugin, 'getMapsByIds, 'removeMap, 'getMapById, 'isKnownId, 'getAllKnownIds])
+$(makeAcidic ''MapMonitorState ['updateMaps', 'replaceMap, 'replaceMaps, 'addNewMaps, 'addNewMaps', 'getMaps, 'getMapMonitorState, 'hideMap, 'setAtSetByPlugin, 'getMapsByIds, 'removeMap, 'getMapById, 'isKnownId, 'getAllKnownIds])
 
 updateMaps :: (MonadIO m) => AcidState MapMonitorState -> [TMMapPatch] -> m [TMMap]
 updateMaps _    [] = return []

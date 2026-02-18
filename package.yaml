@@ -49,7 +49,7 @@ dependencies:
 - either
 - barbies
 - cereal
-- data-default
+- data-default-class
 - async
 - async-pool
 - http-api-data
@@ -61,6 +61,7 @@ dependencies:
 - prometheus-metrics-ghc
 - retry
 - conduit
+- conduit-extra
 - directory
 - stm-conduit
 - pingrpc
@@ -68,10 +69,13 @@ dependencies:
 - monad-logger
 - optparse-applicative
 - zeromq4-haskell
+- minio-hs
+- req
+- req-conduit
+- filepath
 
 default-extensions:
 - LambdaCase
-- NoImplicitPrelude
 - OverloadedStrings
 - TypeApplications
 - FlexibleContexts
@@ -106,6 +110,39 @@ executables:
   map-monitor-exe:
     main:                Main.hs
     source-dirs:         app
+    when:
+      - condition: flag(static)
+        then:
+          ld-options:
+          - -static
+          - -pthread
+          - -lstdc++
+          - -lsodium
+          ghc-options:
+            - -threaded
+            - -rtsopts
+            - -with-rtsopts=-N
+            - -optc-Os
+            - -optl=-pthread
+            - -optl=-static
+            - -optc=-flto=8
+            - -optl=-flto=8
+            - -optc=-fuse-ld=mold
+            - -optl=-fuse-ld=mold
+            - -fPIC
+        else:
+          ghc-options:
+            - -optc=-fuse-ld=mold
+            - -optl=-fuse-ld=mold
+            - -threaded
+            - -rtsopts
+            - -with-rtsopts=-N
+    dependencies:
+    - map-monitor
+
+  map-monitor-ttt-exe:
+    main:                Main.hs
+    source-dirs:         ttt
     when:
       - condition: flag(static)
         then:

@@ -1,3 +1,4 @@
+{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -5,6 +6,7 @@
 module MapMonitor.Server
 where
 
+import Data.IxSet.Typed
 import qualified System.ZMQ4 as ZMQ
 import Control.Category (id)
 import Control.Lens
@@ -221,10 +223,11 @@ is404 res =
 
 collectBeatenAtsResponse :: (MonadIO m, MonadReader env m, HasState env) => m RecentlyBeatenAtsResponse
 collectBeatenAtsResponse = do
-  beatenmaps <- queryAcid GetBeatenMaps
+  st <- queryAcid GetMapMonitorState
   let
-    allMaps = take 200 $ toRow <$> beatenmaps
-    below100k = take 200 $ toRow <$> filter (\tmmap -> unTMXId (_tmm_tmxId tmmap) < 100000) beatenmaps
+    beatenMaps = ((@= HasNadeoInfo True) . (@= Beaten)) (_mms_maps st)
+    allMaps = take 200 $ toRow <$> toDescList (Proxy @WrTimestamp) beatenMaps
+    below100k = take 200 $ toRow <$> toDescList (Proxy @WrTimestamp) (beatenMaps @< TMXId 100000)
   return $
     RecentlyBeatenAtsResponse
       { _rbar_keys = ["TrackID", "TrackUID", "Track_Name", "AuthorLogin", "Tags", "MapType", "AuthorTime", "WR", "LastChecked", "ATBeatenTimestamp", "ATBeatenUsers", "NbPlayers"]

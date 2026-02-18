@@ -48,7 +48,6 @@ library
       src
   default-extensions:
       LambdaCase
-      NoImplicitPrelude
       OverloadedStrings
       TypeApplications
       FlexibleContexts
@@ -70,17 +69,20 @@ library
     , cereal
     , clock
     , conduit
+    , conduit-extra
     , containers
-    , data-default
+    , data-default-class
     , dhall
     , directory
     , either
+    , filepath
     , http-api-data
     , http-client
     , http-client-tls
     , http-types
     , ixset-typed
     , lens
+    , minio-hs
     , monad-logger
     , network
     , optparse-applicative
@@ -88,6 +90,8 @@ library
     , prometheus-client
     , prometheus-metrics-ghc
     , protolude
+    , req
+    , req-conduit
     , retry
     , rio
     , safecopy
@@ -120,7 +124,6 @@ executable map-monitor-exe
       app
   default-extensions:
       LambdaCase
-      NoImplicitPrelude
       OverloadedStrings
       TypeApplications
       FlexibleContexts
@@ -142,11 +145,13 @@ executable map-monitor-exe
     , cereal
     , clock
     , conduit
+    , conduit-extra
     , containers
-    , data-default
+    , data-default-class
     , dhall
     , directory
     , either
+    , filepath
     , http-api-data
     , http-client
     , http-client-tls
@@ -154,6 +159,7 @@ executable map-monitor-exe
     , ixset-typed
     , lens
     , map-monitor
+    , minio-hs
     , monad-logger
     , network
     , optparse-applicative
@@ -161,6 +167,90 @@ executable map-monitor-exe
     , prometheus-client
     , prometheus-metrics-ghc
     , protolude
+    , req
+    , req-conduit
+    , retry
+    , rio
+    , safecopy
+    , servant
+    , servant-auth
+    , servant-auth-server
+    , servant-client
+    , servant-server
+    , stm
+    , stm-conduit
+    , temporary
+    , time
+    , typed-process
+    , unliftio
+    , unordered-containers
+    , wai
+    , wai-extra
+    , wai-middleware-prometheus
+    , warp
+    , zeromq4-haskell
+  default-language: Haskell2010
+  if flag(static)
+    ghc-options: -threaded -rtsopts -with-rtsopts=-N -optc-Os -optl=-pthread -optl=-static -optc=-flto=8 -optl=-flto=8 -optc=-fuse-ld=mold -optl=-fuse-ld=mold -fPIC
+    ld-options: -static -pthread -lstdc++ -lsodium
+  else
+    ghc-options: -optc=-fuse-ld=mold -optl=-fuse-ld=mold -threaded -rtsopts -with-rtsopts=-N
+
+executable map-monitor-ping-bot-exe
+  main-is: Main.hs
+  other-modules:
+      Paths_map_monitor
+  autogen-modules:
+      Paths_map_monitor
+  hs-source-dirs:
+      dsbot
+  default-extensions:
+      LambdaCase
+      OverloadedStrings
+      TypeApplications
+      FlexibleContexts
+      FlexibleInstances
+      TypeFamilies
+      TypeOperators
+      DataKinds
+      ViewPatterns
+      BlockArguments
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  build-depends:
+      acid-state
+    , aeson
+    , api-integrations
+    , async
+    , async-pool
+    , barbies
+    , base >=4.7 && <5
+    , cereal
+    , clock
+    , conduit
+    , conduit-extra
+    , containers
+    , data-default-class
+    , dhall
+    , directory
+    , discord-haskell
+    , either
+    , filepath
+    , http-api-data
+    , http-client
+    , http-client-tls
+    , http-types
+    , ixset-typed
+    , lens
+    , minio-hs
+    , monad-logger
+    , network
+    , optparse-applicative
+    , pingrpc
+    , prometheus-client
+    , prometheus-metrics-ghc
+    , protolude
+    , req
+    , req-conduit
     , retry
     , rio
     , safecopy
@@ -188,17 +278,16 @@ executable map-monitor-exe
   else
     ghc-options: -threaded -rtsopts -with-rtsopts=-N
 
-executable map-monitor-ping-bot-exe
+executable map-monitor-ttt-exe
   main-is: Main.hs
   other-modules:
       Paths_map_monitor
   autogen-modules:
       Paths_map_monitor
   hs-source-dirs:
-      dsbot
+      ttt
   default-extensions:
       LambdaCase
-      NoImplicitPrelude
       OverloadedStrings
       TypeApplications
       FlexibleContexts
@@ -220,18 +309,21 @@ executable map-monitor-ping-bot-exe
     , cereal
     , clock
     , conduit
+    , conduit-extra
     , containers
-    , data-default
+    , data-default-class
     , dhall
     , directory
-    , discord-haskell
     , either
+    , filepath
     , http-api-data
     , http-client
     , http-client-tls
     , http-types
     , ixset-typed
     , lens
+    , map-monitor
+    , minio-hs
     , monad-logger
     , network
     , optparse-applicative
@@ -239,6 +331,8 @@ executable map-monitor-ping-bot-exe
     , prometheus-client
     , prometheus-metrics-ghc
     , protolude
+    , req
+    , req-conduit
     , retry
     , rio
     , safecopy
@@ -276,7 +370,6 @@ executable map-monitor-zmq-exe
       broker
   default-extensions:
       LambdaCase
-      NoImplicitPrelude
       OverloadedStrings
       TypeApplications
       FlexibleContexts
@@ -298,17 +391,20 @@ executable map-monitor-zmq-exe
     , cereal
     , clock
     , conduit
+    , conduit-extra
     , containers
-    , data-default
+    , data-default-class
     , dhall
     , directory
     , either
+    , filepath
     , http-api-data
     , http-client
     , http-client-tls
     , http-types
     , ixset-typed
     , lens
+    , minio-hs
     , monad-logger
     , network
     , optparse-applicative
@@ -316,6 +412,8 @@ executable map-monitor-zmq-exe
     , prometheus-client
     , prometheus-metrics-ghc
     , protolude
+    , req
+    , req-conduit
     , retry
     , rio
     , safecopy
@@ -354,7 +452,6 @@ test-suite map-monitor-test
       test
   default-extensions:
       LambdaCase
-      NoImplicitPrelude
       OverloadedStrings
       TypeApplications
       FlexibleContexts
@@ -376,11 +473,13 @@ test-suite map-monitor-test
     , cereal
     , clock
     , conduit
+    , conduit-extra
     , containers
-    , data-default
+    , data-default-class
     , dhall
     , directory
     , either
+    , filepath
     , http-api-data
     , http-client
     , http-client-tls
@@ -388,6 +487,7 @@ test-suite map-monitor-test
     , ixset-typed
     , lens
     , map-monitor
+    , minio-hs
     , monad-logger
     , network
     , optparse-applicative
@@ -395,6 +495,8 @@ test-suite map-monitor-test
     , prometheus-client
     , prometheus-metrics-ghc
     , protolude
+    , req
+    , req-conduit
     , retry
     , rio
     , safecopy

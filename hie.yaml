@@ -9,6 +9,9 @@ cradle:
     - path: "./dsbot/Main.hs"
       component: "map-monitor:exe:map-monitor-ping-bot-exe"
 
+    - path: "./ttt/Main.hs"
+      component: "map-monitor:exe:map-monitor-ttt-exe"
+
     - path: "./broker/Main.hs"
       component: "map-monitor:exe:map-monitor-zmq-exe"
 

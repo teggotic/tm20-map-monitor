@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 
@@ -16,7 +17,7 @@ import Network.HTTP.Client.TLS
 import Network.HTTP.Types.Header (hUserAgent)
 import Network.Socket (PortNumber)
 import Protolude hiding (withFile, atomically, bracket, forkIO, threadDelay, to, toList, try)
-import RIO (MonadUnliftIO, newTMVarIO, withLogFunc, setLogUseTime, logOptionsHandle, withFile, hSetBuffering, BufferMode (LineBuffering))
+import RIO (MonadUnliftIO, newTMVarIO, withLogFunc, setLogUseTime, logOptionsHandle, withFile, hSetBuffering, BufferMode (LineBuffering), LogFunc)
 import Servant.Auth.Server
 import Servant.Client
 import UnliftIO.Exception (bracket)
@@ -51,30 +52,31 @@ runInApp unbeatenAtsCache beatenAtsCache acid checkMapFileQueue m = do
       throttler <- newTMVarIO =<< getCurrentTime
       tokenStateRef <- RIO.newTMVarIO Nothing
 
-      logOptions' <- logOptionsHandle h False
-      let logOptions = setLogUseTime True logOptions'
-      withLogFunc logOptions $ \logFunc -> do
-        withPubSocket \sock -> do
-          let appState =
-                AppState
-                  { _appState_acid = acid
-                  , _appState_unbeatenAtsCache = unbeatenAtsCache
-                  , _appState_beatenAtsCache = beatenAtsCache
-                  , _appState_coreNadeoClient = coreNadeoClient
-                  , _appState_liveServicesNadeoClient = liveServicesNadeoClient
-                  , _appState_tmxClient = tmxClient
-                  , _appState_xertrovClient = xertrovClient
-                  , _appState_openPlanetClient = openPlanetClient
-                  , _appState_nadeoToken = tokenStateRef
-                  , _appState_settings = settings
-                  , _appState_jwtSettings = jwtSettings
-                  , _appState_nadeoThrottler = throttler
-                  , _appState_nadeoRequestRate = 0.5
-                  , _appState_logFunc = logFunc
-                  , _appState_pubSocket = sock
-                  , _appState_checkMapFileQueue = checkMapFileQueue
-                  }
-          runReaderT m appState
+      logOptions <- setLogUseTime True <$> logOptionsHandle h False
+      withLogFunc logOptions $ \logFunc1 -> do
+        logOptions' <- setLogUseTime True <$> logOptionsHandle stdout False
+        withLogFunc logOptions' $ \logFunc2 -> do
+          withPubSocket \sock -> do
+            let appState =
+                  AppState
+                    { _appState_acid = acid
+                    , _appState_unbeatenAtsCache = unbeatenAtsCache
+                    , _appState_beatenAtsCache = beatenAtsCache
+                    , _appState_coreNadeoClient = coreNadeoClient
+                    , _appState_liveServicesNadeoClient = liveServicesNadeoClient
+                    , _appState_tmxClient = tmxClient
+                    , _appState_xertrovClient = xertrovClient
+                    , _appState_openPlanetClient = openPlanetClient
+                    , _appState_nadeoToken = tokenStateRef
+                    , _appState_settings = settings
+                    , _appState_jwtSettings = jwtSettings
+                    , _appState_nadeoThrottler = throttler
+                    , _appState_nadeoRequestRate = 0.5
+                    , _appState_logFunc = logFunc1 <> logFunc2
+                    , _appState_pubSocket = sock
+                    , _appState_checkMapFileQueue = checkMapFileQueue
+                    }
+            runReaderT m appState
 
   case _settings_logFile settings of
     Nothing -> go stderr

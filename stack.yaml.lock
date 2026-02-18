@@ -5,6 +5,17 @@
 
 packages:
 - completed:
+    commit: 3e665784228cba7261560c104b8f1d928e7b5bd4
+    git: https://github.com/minio/minio-hs.git
+    name: minio-hs
+    pantry-tree:
+      sha256: b40b79fedd757eac8825f89eafc5ee13f3991898e407cb3d1c9b5a3b15bffdfc
+      size: 4744
+    version: 1.7.0
+  original:
+    commit: 3e665784228cba7261560c104b8f1d928e7b5bd4
+    git: https://github.com/minio/minio-hs.git
+- completed:
     hackage: discord-haskell-1.18.0@sha256:0b88b1c391542b36243647f3533261867a1bd59cb2194519bc4b0e45b9a73797,7032
     pantry-tree:
       sha256: 08c931796e4cdab60dd889f6a7f2c8cbcb72f9cdedfeee683c3a0593294073f8
