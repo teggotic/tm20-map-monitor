@@ -5,41 +5,55 @@
   <title>Upload validation replay</title>
   <style>
     body {
-      font-family: "Comic Sans MS";
+      background-color: #282838;
+      color: #cccccc;
     }
-
-    .htmx-indicator{
+    a { color: #FF0000; }
+    .my-indicator{
         display:none;
     }
-    .htmx-request .htmx-indicator{
+    .htmx-request .my-indicator{
         display:inline;
     }
-    .htmx-request.htmx-indicator{
+    .htmx-request.my-indicator{
         display:inline;
     }
   </style>
 </head>
 <body>
   <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.8/dist/htmx.min.js"></script>
-  <h1>Upload validation replay</h1>
-  <h2>If replay is valid (after simulating using physics engine), plugin will clearly show that in the plugin (comming soon)</h2>
-  <form id="form" hx-post="/upload-replay" hx-encoding="multipart/form-data" hx-target="#upload-replay-result" hx-swap="beforeend">
-    <div>
-      <input type="number" name="tmxid">TMX id</input>
+  <h1>Upload validation replay for Unbeaten ATs plugin</h1>
+  <h3>If replay is valid (after simulating using physics engine), plugin will clearly show that in the plugin (comming soon)</h3>
+  <form id="form" hx-post="/htmx/upload-replay" hx-encoding="multipart/form-data" hx-target="#upload-replay-result" hx-swap="beforeend" hx-indicator="#upload-indicator">
+    <div style="border: 1px solid gray; padding: 4px;">
+      TMX id:
+        <input
+          type="number"
+          name="tmxid"
+          hx-trigger="input changed delay:500ms, keyup[key=='Enter'], load"
+          hx-get="/htmx/map-by-tmxid"
+          hx-indicator="#map-search-indicator"
+          hx-swap="innerHTML"
+          hx-target="#map-search-result"
+        >
+        <span id="map-search-indicator" class="my-indicator">Loading...</span>
+        <span id="map-search-result"></span>
     </div>
-    <div>
-      <input type="file" name="replay">
+    <div style="border: 1px solid gray; border-top: 0; padding: 4px;">
+      Replay file: <input type="file" name="replay">
     </div>
-    <div>
-      <div> <input type="checkbox" name="public" value="yes">Make public</input> </div>
-      <div>If checked, I will persist replay on server and make it available for download from the plugin.</div>
-      <div>Otherwise, I will fully delete the replay from my server.</div>
-      <div>I cannot really prove it's fully removed, so its up to you to decide if you really want to upload replays that you don't want to be publicly available.</div
+    <div style="border: 1px solid gray; border-top: 0; padding: 4px;">
+      <div>Make validation replay public: <input type="checkbox" name="public" value="yes"> </div>
+      <div style="font-size: 0.8rem;">
+        <div>If checked, I will persist replay on server and make it available for download from the plugin.</div>
+        <div>Otherwise, I will fully delete the replay file from server.</div>
+        <div>I cannot really prove it's fully removed, so its up to you to decide if you want to upload replays that you don't want to be publicly available.</div>
+      </div>
     </div>
     <div>
       <button>Upload</button>
     </div>
-    <img class="htmx-indicator" src="/spinner.gif" alt="Loading...">
+    <span id="upload-indicator" class="my-indicator">Loading...</span>
   </form>
   <div id="upload-replay-result">
   </div>

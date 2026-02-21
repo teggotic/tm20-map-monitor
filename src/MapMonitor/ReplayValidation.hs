@@ -19,8 +19,9 @@ import MapMonitor.API
 import Control.Lens hiding ((<.>))
 import Network.Minio
 import Data.Aeson.Key
-import RIO (toStrictBytes)
+import RIO (toStrictBytes, logError, displayShow, HasLogFunc)
 import UnliftIO
+import RIO.Time (getCurrentTime)
 
 data SimulationResult
   = SimulationResult
@@ -45,9 +46,8 @@ data ValidationResult
 
 $(deriveFromJSON defaultOptions{fieldLabelModifier = drop (Text.length "_vr_")} ''ValidationResult)
 
-validateReplay :: (MonadUnliftIO m, MonadReader env m, HasState env, HasS3Connection env) => ValidationReplayUpload -> m (Either Text ())
+validateReplay :: (MonadUnliftIO m, MonadReader env m, HasState env, HasS3Connection env, HasLogFunc env) => ValidationReplayUpload -> m (Either Text (Maybe Text))
 validateReplay req = do
-  print req
   queryAcid (GetMapById $ TMXId $ _vru_tmxid $ req) >>= \case
     Nothing -> return $ Left $ "Map not found"
     Just tmmap -> do
@@ -80,7 +80,25 @@ validateReplay req = do
                              Just sr ->
                                if _sr_Time sr == _tmm_authorMedal tmmap
                                  then do
-                                   return $ Right ()
+                                   now <- getCurrentTime
+                                   case (_vru_public req) of
+                                     False -> do
+                                       void $ withAcid1 updateMaps
+                                        [ (defPatch $ _tmm_tmxId tmmap){_tmmp_validationReplay = Just $ Just (Nothing, now)}
+                                        ]
+                                       return $ Right Nothing
+                                     True -> do
+                                       uploaded <- liftIO $ runMinioWith conn do
+                                         fPutObject "map-monitor-replays" ("ghosts/" <> (show uuid) <> ".Ghost.Gbx") ghostPath defaultPutObjectOptions
+                                       case uploaded of
+                                         Left err -> do
+                                           logError $ "Error uploading replay: " <> displayShow err
+                                           return $ Right Nothing
+                                         Right _ -> do
+                                           void $ withAcid1 updateMaps
+                                            [ (defPatch $ _tmm_tmxId tmmap){_tmmp_validationReplay = Just $ Just (Just (show uuid), now)}
+                                            ]
+                                           return $ Right $ Just $ show uuid
                                  else return $ Left $ "Replay is valid, but replay length does not match AT"
                            else return $ Left $ "Validation failed: " <> show res
                       _ -> do

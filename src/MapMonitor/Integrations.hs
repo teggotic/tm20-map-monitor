@@ -51,6 +51,8 @@ tmxMapToTMMap tmx =
         x -> Just $ MT_Other x
     , _tmm_mapVersions = []
     , _tmm_hiddenOnTmx = False
+    , _tmm_beatenPingSent = False
+    , _tmm_validationReplay = Nothing
     }
 
 tmxMapsSource :: (MonadIO m, MonadReader env m, HasTMXClient env, HasLogFunc env) => Int -> Maybe Int -> ConduitT () TMMap m ()
@@ -79,7 +81,7 @@ collectUnknownMapC :: (MonadIO m, MonadFail m, MonadReader env m, HasState env, 
 collectUnknownMapC = do
   checkMapFileQueue <- view checkMapFileQueueL
 
-  filterMC (fmap not . queryAcid . IsKnownId . _tmm_tmxId)
+  mapHasNewInfoFilterMC
     .| wrapChunkedC 100 (iterMC $ updateAcid . AddNewMaps')
     .| loadNadeoMapInfoC
     .| refreshMapRecordC Nothing
@@ -110,25 +112,31 @@ refreshMapRecordC mapsCntM =
   )
   .| wrapChunkedC 100 (mapMC $ withAcid1 updateMaps)
 
--- mapHasNewInfoFilterMC :: (MonadUnliftIO m, MonadReader env m, HasState env) => ConduitT TMMap TMMap m ()
--- mapHasNewInfoFilterMC = do
---   mapMC (\mp -> (,) <$> checkMapHasNewInfo mp <*> pure mp)
---   .| filterC fst
---   .| mapC snd
---
---   where
---     checkMapHasNewInfo mp = do
---       dbmapM <- queryAcid $ GetMapById (_tmm_tmxId mp)
---       case dbmapM of
---         Nothing -> return True
---         Just dbmap -> do
---           return $ or
---             [ _tmm_uid dbmap /= _tmm_uid mp
---             , _tmm_name dbmap /= _tmm_name mp
---             , _tmm_authorMedal dbmap /= _tmm_authorMedal mp
---             , _tmm_tags dbmap /= _tmm_tags mp
---             , _tmm_mapType dbmap /= _tmm_mapType mp
---             ]
+
+catMaybesC :: (Monad m) => ConduitT (Maybe a) a m ()
+catMaybesC = do
+  awaitForever $ maybe pass yield
+
+mapHasNewInfoFilterMC :: (MonadIO m, MonadReader env m, HasState env) => ConduitT TMMap TMMap m ()
+mapHasNewInfoFilterMC = do
+  mapMC checkMapHasNewInfo
+  .| catMaybesC
+
+  where
+    checkMapHasNewInfo mp = do
+      dbmapM <- queryAcid $ GetMapById (_tmm_tmxId mp)
+      case dbmapM of
+        Nothing -> do
+          updateAcid $ AddNewMaps' [mp]
+          return $ Just mp
+        Just dbmap ->
+          if isMapNewVersion mp dbmap
+             then updateAcid $ TryUpdateMapVersion mp
+             else if _tmm_hiddenOnTmx dbmap
+               then do
+                 void $ withAcid1 updateMaps [(defPatch (_tmm_tmxId mp)){_tmmp_hiddenOnTmx = Just False}]
+                 return $ Just dbmap {_tmm_hiddenOnTmx = False}
+               else return Nothing
 
 getMapRecord :: (MonadIO m, MonadReader env m, HasLogFunc env, HasNadeoCoreClient env, HasNadeoTokenState env, HasNadeoLiveClient env, HasNadeoRequestRate env, HasNadeoThrottler env, MonadFail m, HasNadeoAuthToken env) => TMMap -> m (TMMapPatch, TMMap)
 getMapRecord tmmap = do

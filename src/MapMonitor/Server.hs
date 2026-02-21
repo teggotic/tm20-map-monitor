@@ -222,36 +222,62 @@ runAppState m = do
 
 -- {"/tmp/map-monitor-validation-b6aa46134a327852/447099bd-0928-4996-8cc2-2f4c0d8b535c.Replay.Gbx":{"ValidatedResult":{"NbCheckpoints":1,"NbRespawns":0,"Time":7786,"Score":0},"IsValid":true,"Desc":null,"FileName":"a4f31d82-ed96-4001-8756-881ed8f6be95.Ghost.Gbx","MapUid":"OKbCJHQrD7IuINQPTJi0lPf8w1h"}} 
 
-server1 :: ServerT MapMonitorAPI AppM
-server1 = tmxApiServer :<|> downloadMapsServer :<|> managementApiServer :<|> authApiServer :<|> staticServer :<|> uploadFile
+htmxServer :: ServerT HtmxAPI AppM
+htmxServer = uploadFile :<|> mapByTmxId
   where
-    staticServer = serveDirectoryWebApp "/home/teggot/projects/haskell/map-monitor/assets"
-
     uploadFile multipartData = do
       runAppState do
+        host <- view $ appSettingsL . settings_s3_creds . s3_creds_host
         flip finally (removeFile $ _vru_replay $ multipartData) $ do
           s <- flip withAsync wait $ do
             validateReplay multipartData >>= \case
               Left err -> do
                 return $ "Validation failed: " <> show err
-              Right _ -> do
+              Right Nothing -> do
+                refreshCaches
                 return $ "Validation successful"
+              Right (Just uuid) -> do
+                refreshCaches
+                let url = "https://" <> "map-monitor-replays" <> "." <> host <> "/ghosts/" <> uuid <> ".Ghost.Gbx"
+                return $ "Validation successful <a href=\"" <> url <> "\">(ghost)</a>"
           return $ "<div>" <> show (_vru_tmxid multipartData) <> ": " <> s <> "</div>"
 
+    mapByTmxId tmxidStr = do
+      runAppState do
+        case readMaybe tmxidStr of
+          Nothing -> return ""
+          Just tmxid -> do
+            dbmapM <- queryAcid $ GetMapById $ TMXId tmxid
+            case dbmapM of
+              Nothing -> return "Map not found"
+              Just dbmap -> return $ "<span>" <> show (unTMXId $ _tmm_tmxId dbmap) <> ": " <> _tmm_name dbmap <> (if isMapUnbeaten dbmap then " (unbeaten)" else " <span style=\"color: yellow;\">(beaten)</span>") <> "</span>"
+
+server1 :: FilePath -> ServerT MapMonitorAPI AppM
+server1 staticPath = tmxApiServer :<|> downloadMapsServer :<|> managementApiServer :<|> authApiServer :<|> staticServer :<|> htmxServer :<|> dbDump
+  where
+    staticServer = do
+      serveDirectoryWebApp staticPath
+
+    dbDump = do
+      db <- queryAcid GetMapMonitorState
+      return db
+
 fallbackApp :: Application
-fallbackApp req respond = do
+fallbackApp _ respond = do
   respond $ responseLBS H.status404 [] ";...;"
 
 app :: Servant.Server.Context '[CookieSettings, JWTSettings] -> AppState -> Application
 app cfg state req respond = do
   -- putText $ "Request: " <> show req
-  let servantApp =
-        serveWithContext mapMonitorAPI cfg $
-          hoistServerWithContext
-            mapMonitorAPI
-            (Proxy :: Proxy '[CookieSettings, JWTSettings])
-            (`runReaderT` state)
-            server1
+  let
+    staticPath = state ^. appSettingsL . settings_static
+    servantApp =
+      serveWithContext mapMonitorAPI cfg $
+        hoistServerWithContext
+          mapMonitorAPI
+          (Proxy :: Proxy '[CookieSettings, JWTSettings])
+          (`runReaderT` state)
+          (server1 staticPath)
   servantApp req $ \res ->
     if is404 res
       then fallbackApp req respond
@@ -291,9 +317,10 @@ collectBeatenAtsResponse = do
     , fromMaybe 123456 (_tmm_nbPlayers tmmap)
     )
 
-collectUnbeatenAtsResponse :: (MonadIO m, MonadReader env m, HasState env) => m UnbeatenAtsResponse
+collectUnbeatenAtsResponse :: (MonadIO m, MonadReader env m, HasState env, HasAppSettings env) => m UnbeatenAtsResponse
 collectUnbeatenAtsResponse = do
   allMaps <- queryAcid GetMaps
+  host <- view $ appSettingsL . settings_s3_creds . s3_creds_host
   let
     unbeatenMaps =
       flip fmap allMaps $ \tmmap ->
@@ -313,11 +340,10 @@ collectUnbeatenAtsResponse = do
         , _uat_atSetByPlugin = fromMaybe False (_tmm_atSetByPlugin tmmap)
         , _uat_reported = (\(k, (_, r)) -> (k, r)) <$> Map.assocs (_tmm_reportedBy tmmap)
         , _uat_uploadedTimestamp = maybe 0 (nominalDiffTimeToSeconds . utcTimeToPOSIXSeconds) (_tmm_uploadedAt tmmap)
-        , _uat_validation = if (_tmm_tmxId tmmap) == 285216
-                              then (True, "https://map-monitor-test.nbg1.your-objectstorage.com/as7WsEWDwP4g56F4bJZQ4KYiIA9.Ghost.Gbx")
-                              else if (_tmm_tmxId tmmap) == 285217
-                                then (True, "")
-                                else (False, "")
+        , _uat_validation =
+          case _tmm_validationReplay tmmap of
+            Nothing -> (False, "")
+            Just (url, _) -> (True, maybe "" (\x -> "https://" <> "map-monitor-replays" <> "." <> host <> "/ghosts/" <> x <> ".Ghost.Gbx") url)
         }
 
   return $
@@ -327,7 +353,7 @@ collectUnbeatenAtsResponse = do
       , _uar_nbTracks = length unbeatenMaps
       }
 
-refreshCaches :: (MonadIO m, MonadReader env m, HasState env, HasBeatenAtsCache env, HasUnbeatenAtsCache env) => m ()
+refreshCaches :: (MonadIO m, MonadReader env m, HasState env, HasBeatenAtsCache env, HasUnbeatenAtsCache env, HasAppSettings env) => m ()
 refreshCaches = do
   view unbeatenAtsCacheL >>= \c ->
     atomically . writeTVar c =<< collectUnbeatenAtsResponse

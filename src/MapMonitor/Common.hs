@@ -17,7 +17,17 @@ module MapMonitor.Common (
   updateAcid,
   withAcid1,
   withAcid2,
+  -- lenses
   settings_auth,
+  settings_openplanetAuthSecret,
+  settings_mapsCacheDirectory,
+  settings_logFile,
+  settings_s3_creds,
+  settings_static,
+  s3_creds_access,
+  s3_creds_secret,
+  s3_creds_host,
+  s3_creds_bucket,
 )
 where
 
@@ -44,6 +54,8 @@ data AppSettingsS3
   }
   deriving (Generic, Show)
 
+$(makeLenses ''AppSettingsS3)
+
 instance FromDhall AppSettingsS3
 
 data AppSettings
@@ -53,7 +65,7 @@ data AppSettings
   , _settings_mapsCacheDirectory :: !(Maybe FilePath)
   , _settings_logFile :: !(Maybe FilePath)
   , _settings_s3_creds :: !AppSettingsS3
-  -- , _settings_static :: !Text
+  , _settings_static :: !FilePath
   }
   deriving (Generic, Show)
 

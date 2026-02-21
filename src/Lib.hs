@@ -27,10 +27,31 @@ import System.Directory (doesFileExist)
 import RIO.Time (getCurrentTime)
 import PingRPC (withPubSocket)
 import Network.Minio
+import Control.Lens.TH
 
-runInApp :: (MonadUnliftIO m) => TVar UnbeatenAtsResponse -> TVar RecentlyBeatenAtsResponse -> AcidState MapMonitorState -> TQueue TMMap -> ReaderT AppState m b -> m b
-runInApp unbeatenAtsCache beatenAtsCache acid checkMapFileQueue m = do
+data CollectCacheState
+  = CollectCacheState
+  { _ccs_acid :: !(AcidState MapMonitorState)
+  , _ccs_settings :: !AppSettings
+  }
+
+$(makeLenses ''CollectCacheState)
+
+instance HasState CollectCacheState where
+  stateL = ccs_acid
+
+instance HasAppSettings CollectCacheState where
+  appSettingsL = ccs_settings
+
+runInApp :: (MonadUnliftIO m) => AcidState MapMonitorState -> TQueue TMMap -> ReaderT AppState m b -> m b
+runInApp acid checkMapFileQueue m = do
   settings <- liftIO $ input auto "./settings.dhall"
+
+  unbeatenAtsCache <- flip runReaderT (CollectCacheState acid settings) $ do
+    collectUnbeatenAtsResponse >>= liftIO . newTVarIO
+  beatenAtsCache <- flip runReaderT acid $ do
+    collectBeatenAtsResponse >>= liftIO . newTVarIO
+
   jwtAccessKey <- liftIO $
     (doesFileExist "/tmp/jwt-access-key.secret") >>= Protolude.bool generateKey (readKey "/tmp/jwt-access-key.secret")
   manager' <-
@@ -51,7 +72,7 @@ runInApp unbeatenAtsCache beatenAtsCache acid checkMapFileQueue m = do
     c =
       setCreds
       (CredentialValue (AccessKey $ _s3_creds_access $ _settings_s3_creds settings) (fromString $ T.unpack $ _s3_creds_secret $ _settings_s3_creds settings) Nothing)
-      (fromString $ T.unpack $ _s3_creds_host $ _settings_s3_creds settings)
+      (fromString $ T.unpack $ "https://" <> (_s3_creds_host $ _settings_s3_creds settings))
   conn <- liftIO $ mkMinioConn c manager'
   let
     go h = do
@@ -95,12 +116,8 @@ runInApp unbeatenAtsCache beatenAtsCache acid checkMapFileQueue m = do
 
 runTemporary :: ( MonadUnliftIO m) =>AcidState MapMonitorState -> ReaderT AppState m b -> m b
 runTemporary acid m = do
-  unbeatenAtsCache <- flip runReaderT acid $ do
-    collectUnbeatenAtsResponse >>= liftIO . newTVarIO
-  beatenAtsCache <- flip runReaderT acid $ do
-    collectBeatenAtsResponse >>= liftIO . newTVarIO
   x <- newTQueueIO
-  runInApp unbeatenAtsCache beatenAtsCache acid x m
+  runInApp acid x m
 
 runRemotely :: (MonadUnliftIO m) => PortNumber -> ReaderT AppState m c -> m c
 runRemotely port m = do

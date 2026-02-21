@@ -40,15 +40,9 @@ runMain opts = runResourceT $ do
   (_, acid) <- allocate (liftIO $ openLocalState (MapMonitorState mempty)) (liftIO . closeAcidState)
   -- liftIO $ createCheckpoint acid
   -- liftIO $ createArchive acid
-  unbeatenAtsCache <- flip runReaderT acid $ do
-    collectUnbeatenAtsResponse >>= liftIO . newTVarIO
-
-  beatenAtsCache <- flip runReaderT acid $ do
-    collectBeatenAtsResponse >>= liftIO . newTVarIO
-
   checkMapFileQueue <- newTQueueIO
 
-  runInApp unbeatenAtsCache beatenAtsCache acid checkMapFileQueue $ do
+  runInApp acid checkMapFileQueue $ do
     void $ flip allocateU killThread $ forkIO $ forever do
       tryAny (processMapFileQueue checkMapFileQueue)
         >>= \case

@@ -18,6 +18,7 @@ import Servant.API
 import Servant.Auth
 import Servant.Auth.JWT
 import Protolude
+import MapMonitor.DB
 
 data AUser = AUser
   { _auser_uid :: !Text
@@ -89,4 +90,9 @@ instance FromMultipart Tmp ValidationReplayUpload where
       <*> (fdPayload <$> lookupFile "replay" multipartData)
       <*> (pure $ either (const False) (const True) $ lookupInput "public" multipartData)
 
-type MapMonitorAPI = TMXApi :<|> DownloadMapAPI :<|> (Auth '[JWT] AUser :> ManagementAPI) :<|> AuthAPI :<|> ("static" :> Raw) :<|> ("upload-replay" :> MultipartForm Tmp ValidationReplayUpload :> Post '[HTML] Text)
+type HtmxAPI = "htmx" :>
+  (("upload-replay" :> MultipartForm Tmp ValidationReplayUpload :> Post '[HTML] Text)
+    :<|> ("map-by-tmxid" :> QueryParam' '[Required] "tmxid" Text :> Get '[HTML] Text)
+  )
+
+type MapMonitorAPI = TMXApi :<|> DownloadMapAPI :<|> (Auth '[JWT] AUser :> ManagementAPI) :<|> AuthAPI :<|> ("static" :> Raw) :<|> HtmxAPI :<|> ("db-dump" :> Get '[JSON] MapMonitorState)
