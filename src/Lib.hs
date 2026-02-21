@@ -28,6 +28,7 @@ import RIO.Time (getCurrentTime)
 import PingRPC (withPubSocket)
 import Network.Minio
 import Control.Lens.TH
+import Control.Concurrent.STM.TSem
 
 data CollectCacheState
   = CollectCacheState
@@ -74,6 +75,7 @@ runInApp acid checkMapFileQueue m = do
       (CredentialValue (AccessKey $ _s3_creds_access $ _settings_s3_creds settings) (fromString $ T.unpack $ _s3_creds_secret $ _settings_s3_creds settings) Nothing)
       (fromString $ T.unpack $ "https://" <> (_s3_creds_host $ _settings_s3_creds settings))
   conn <- liftIO $ mkMinioConn c manager'
+  validationSem <- atomically $ newTSem 2
   let
     go h = do
       throttler <- newTMVarIO =<< getCurrentTime
@@ -104,6 +106,9 @@ runInApp acid checkMapFileQueue m = do
                     , _appState_checkMapFileQueue = checkMapFileQueue
                     , _appState_s3_conn = conn
                     , _appState_s3_bucket = _s3_creds_bucket $ _settings_s3_creds settings
+                    , _appState_syncVars = AppSyncVars
+                      { _appSyncVars_validationSem = validationSem
+                      }
                     }
             runReaderT m appState
 

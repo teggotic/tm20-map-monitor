@@ -4,6 +4,8 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 module MapMonitor.Common (
+  AppSyncVars (..),
+  HasSyncVars (..),
   AppSettingsS3 (..),
   AppSettings (..),
   HasAppSettings (..),
@@ -28,6 +30,7 @@ module MapMonitor.Common (
   s3_creds_secret,
   s3_creds_host,
   s3_creds_bucket,
+  appSyncVars_validationSem,
 )
 where
 
@@ -44,6 +47,17 @@ import UnliftIO.STM
 import UnliftIO.Retry
 import PingRPC
 import Network.Minio (MinioConn)
+import Control.Concurrent.STM.TSem
+
+data AppSyncVars
+  = AppSyncVars
+  { _appSyncVars_validationSem :: !TSem
+  }
+
+$(makeLenses ''AppSyncVars)
+
+class HasSyncVars env where
+  syncVarsL :: Lens' env AppSyncVars
 
 data AppSettingsS3
   = AppSettingsS3

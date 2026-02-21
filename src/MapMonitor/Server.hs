@@ -52,6 +52,7 @@ import RIO.FilePath (takeFileName)
 import System.IO.Temp (withSystemTempDirectory)
 import Data.Aeson.TH (deriveFromJSON)
 import UnliftIO.Directory (removeFile)
+import Control.Concurrent.STM.TSem
 
 data AppState
   = AppState
@@ -73,9 +74,13 @@ data AppState
   , _appState_checkMapFileQueue :: !(TQueue TMMap)
   , _appState_s3_conn :: !MinioConn
   , _appState_s3_bucket :: !Text
+  , _appState_syncVars :: !AppSyncVars
   }
 
 $(makeLenses ''AppState)
+
+instance HasSyncVars AppState where
+  syncVarsL = appState_syncVars
 
 instance HasAppSettings AppState where
   appSettingsL = appState_settings
