@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Upload validation replay</title>
+  <style>
+    body {
+      font-family: "Comic Sans MS";
+    }
+
+    .htmx-indicator{
+        display:none;
+    }
+    .htmx-request .htmx-indicator{
+        display:inline;
+    }
+    .htmx-request.htmx-indicator{
+        display:inline;
+    }
+  </style>
+</head>
+<body>
+  <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.8/dist/htmx.min.js"></script>
+  <h1>Upload validation replay</h1>
+  <h2>If replay is valid (after simulating using physics engine), plugin will clearly show that in the plugin (comming soon)</h2>
+  <form id="form" hx-post="/upload-replay" hx-encoding="multipart/form-data" hx-target="#upload-replay-result" hx-swap="beforeend">
+    <div>
+      <input type="number" name="tmxid">TMX id</input>
+    </div>
+    <div>
+      <input type="file" name="replay">
+    </div>
+    <div>
+      <div> <input type="checkbox" name="public" value="yes">Make public</input> </div>
+      <div>If checked, I will persist replay on server and make it available for download from the plugin.</div>
+      <div>Otherwise, I will fully delete the replay from my server.</div>
+      <div>I cannot really prove it's fully removed, so its up to you to decide if you really want to upload replays that you don't want to be publicly available.</div
+    </div>
+    <div>
+      <button>Upload</button>
+    </div>
+    <img class="htmx-indicator" src="/spinner.gif" alt="Loading...">
+  </form>
+  <div id="upload-replay-result">
+  </div>
+  <script>
+  </script>
+</body>
+</html>

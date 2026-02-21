@@ -6,10 +6,12 @@
 module MapMonitor.Server
 where
 
+import qualified Data.UUID.V4 as UUID4
+import Servant.Multipart as MP
 import Data.IxSet.Typed
 import qualified System.ZMQ4 as ZMQ
 import Control.Category (id)
-import Control.Lens
+import Control.Lens hiding ((.=), (<.>))
 import Data.Acid
 import qualified Data.Map as Map
 import MapMonitor.API
@@ -21,13 +23,16 @@ import MapMonitor.Integrations
 import qualified Network.HTTP.Types as H
 import Network.Wai as Wai
 import PingRPC
-import Protolude hiding (atomically)
-import RIO (toStrictBytes, HasLogFunc (..), LogFunc)
+import Protolude hiding (finally, threadDelay, (<.>), wait, withAsync, atomically)
+import RIO (toStrictBytes, HasLogFunc (..), LogFunc, finally)
 import qualified RIO.Text as Text
 import RIO.Time
 import Servant
 import Servant.Auth.Server
+import MapMonitor.ReplayValidation
 import Servant.Client
+import UnliftIO.Concurrent
+import UnliftIO.Async
 import Servant.Server
 import UnliftIO.STM
 import MapMonitor.API.Nadeo
@@ -36,6 +41,17 @@ import MapMonitor.API.TMX
 import MapMonitor.API.Util
 import Data.Fixed
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
+import Network.Minio
+import System.FilePath ((</>), (<.>))
+import System.Process.Typed
+import qualified RIO.Text as T
+import Data.Aeson (encodeFile, object, (.=), decode)
+import Data.Aeson.Types
+import Data.Aeson.Key (fromString)
+import RIO.FilePath (takeFileName)
+import System.IO.Temp (withSystemTempDirectory)
+import Data.Aeson.TH (deriveFromJSON)
+import UnliftIO.Directory (removeFile)
 
 data AppState
   = AppState
@@ -55,6 +71,8 @@ data AppState
   , _appState_logFunc :: !LogFunc
   , _appState_pubSocket :: !(ZMQ.Socket ZMQ.Pub)
   , _appState_checkMapFileQueue :: !(TQueue TMMap)
+  , _appState_s3_conn :: !MinioConn
+  , _appState_s3_bucket :: !Text
   }
 
 $(makeLenses ''AppState)
@@ -110,6 +128,10 @@ instance HasPubRpcSocket AppState where
 instance HasCheckMapFileQueue AppState where
   checkMapFileQueueL = appState_checkMapFileQueue
 
+instance HasS3Connection AppState where
+  s3ConnL = appState_s3_conn
+  s3BucketL = appState_s3_bucket
+
 type AppM = ReaderT AppState Servant.Server.Handler
 
 mapMonitorAPI :: Proxy MapMonitorAPI
@@ -162,8 +184,7 @@ managementApiServer (Authenticated auser) = managementReportMap :<|> managementD
     return NoContent
 
   managementAddMissingMap tmxId = do
-    st <- ask
-    liftIO $ flip runReaderT st $ do
+    runAppState do
       addMissingMaps [tmxId]
     refreshCaches
     return NoContent
@@ -194,8 +215,28 @@ authApiServer = authOpenplanetToken :<|> authIsTrusted
   authIsTrusted accountId = do
     return $ accountId `elem` trustedUsers
 
+runAppState :: (MonadReader AppState m, MonadIO m) => ReaderT AppState IO a -> m a
+runAppState m = do
+  st <- ask
+  liftIO $ runReaderT m st
+
+-- {"/tmp/map-monitor-validation-b6aa46134a327852/447099bd-0928-4996-8cc2-2f4c0d8b535c.Replay.Gbx":{"ValidatedResult":{"NbCheckpoints":1,"NbRespawns":0,"Time":7786,"Score":0},"IsValid":true,"Desc":null,"FileName":"a4f31d82-ed96-4001-8756-881ed8f6be95.Ghost.Gbx","MapUid":"OKbCJHQrD7IuINQPTJi0lPf8w1h"}} 
+
 server1 :: ServerT MapMonitorAPI AppM
-server1 = tmxApiServer :<|> downloadMapsServer :<|> managementApiServer :<|> authApiServer
+server1 = tmxApiServer :<|> downloadMapsServer :<|> managementApiServer :<|> authApiServer :<|> staticServer :<|> uploadFile
+  where
+    staticServer = serveDirectoryWebApp "/home/teggot/projects/haskell/map-monitor/assets"
+
+    uploadFile multipartData = do
+      runAppState do
+        flip finally (removeFile $ _vru_replay $ multipartData) $ do
+          s <- flip withAsync wait $ do
+            validateReplay multipartData >>= \case
+              Left err -> do
+                return $ "Validation failed: " <> show err
+              Right _ -> do
+                return $ "Validation successful"
+          return $ "<div>" <> show (_vru_tmxid multipartData) <> ": " <> s <> "</div>"
 
 fallbackApp :: Application
 fallbackApp req respond = do
@@ -225,7 +266,7 @@ collectBeatenAtsResponse :: (MonadIO m, MonadReader env m, HasState env) => m Re
 collectBeatenAtsResponse = do
   st <- queryAcid GetMapMonitorState
   let
-    beatenMaps = ((@= HasNadeoInfo True) . (@= Beaten)) (_mms_maps st)
+    beatenMaps = (@= Beaten) (_mms_maps st)
     allMaps = take 200 $ toRow <$> toDescList (Proxy @WrTimestamp) beatenMaps
     below100k = take 200 $ toRow <$> toDescList (Proxy @WrTimestamp) (beatenMaps @< TMXId 100000)
   return $
@@ -256,26 +297,32 @@ collectUnbeatenAtsResponse = do
   let
     unbeatenMaps =
       flip fmap allMaps $ \tmmap ->
-        ( _tmm_tmxId tmmap
-        , _tmm_uid tmmap
-        , _tmm_name tmmap
-        , fromMaybe "N/A" (_tmm_authorUid tmmap)
-        , Text.intercalate "," (show <$> _tmm_tags tmmap)
-        , "TM_Race"
-        , _tmm_authorMedal tmmap
-        , fromMaybe (-1) (_tmmr_time <$> _tmm_currentWR tmmap)
-        , 0
-        , fromMaybe 123456 (_tmm_nbPlayers tmmap)
-        , isJust (_tmm_hiddenReason tmmap)
-        , fromMaybe "" (_tmm_hiddenReason tmmap)
-        , fromMaybe False (_tmm_atSetByPlugin tmmap)
-        , (\(k, (_, r)) -> (k, r)) <$> Map.assocs (_tmm_reportedBy tmmap)
-        , maybe 0 (nominalDiffTimeToSeconds . utcTimeToPOSIXSeconds) (_tmm_uploadedAt tmmap)
-        )
+        UnbeatenAtTrack
+        { _uat_trackId = _tmm_tmxId tmmap
+        , _uat_trackUid = _tmm_uid tmmap
+        , _uat_trackName = _tmm_name tmmap
+        , _uat_authorLogin = fromMaybe "N/A" (_tmm_authorUid tmmap)
+        , _uat_tags = Text.intercalate "," (show <$> _tmm_tags tmmap)
+        , _uat_mapType = "TM_Race"
+        , _uat_authorTime = _tmm_authorMedal tmmap
+        , _uat_wr = fromMaybe (-1) (_tmmr_time <$> _tmm_currentWR tmmap)
+        , _uat_lastChecked = 0
+        , _uat_nbPlayers = fromMaybe 123456 (_tmm_nbPlayers tmmap)
+        , _uat_isHidden = isJust (_tmm_hiddenReason tmmap)
+        , _uat_reason = fromMaybe "" (_tmm_hiddenReason tmmap)
+        , _uat_atSetByPlugin = fromMaybe False (_tmm_atSetByPlugin tmmap)
+        , _uat_reported = (\(k, (_, r)) -> (k, r)) <$> Map.assocs (_tmm_reportedBy tmmap)
+        , _uat_uploadedTimestamp = maybe 0 (nominalDiffTimeToSeconds . utcTimeToPOSIXSeconds) (_tmm_uploadedAt tmmap)
+        , _uat_validation = if (_tmm_tmxId tmmap) == 285216
+                              then (True, "https://map-monitor-test.nbg1.your-objectstorage.com/as7WsEWDwP4g56F4bJZQ4KYiIA9.Ghost.Gbx")
+                              else if (_tmm_tmxId tmmap) == 285217
+                                then (True, "")
+                                else (False, "")
+        }
 
   return $
     UnbeatenAtsResponse
-      { _uar_keys = ["TrackID", "TrackUID", "Track_Name", "AuthorLogin", "Tags", "MapType", "AuthorTime", "WR", "LastChecked", "NbPlayers", "IsHidden", "Reason", "AtSetByPlugin", "Reported", "UploadedTimestamp"]
+      { _uar_keys = ["TrackID", "TrackUID", "Track_Name", "AuthorLogin", "Tags", "MapType", "AuthorTime", "WR", "LastChecked", "NbPlayers", "IsHidden", "Reason", "AtSetByPlugin", "Reported", "UploadedTimestamp", "Validation"]
       , _uar_tracks = unbeatenMaps
       , _uar_nbTracks = length unbeatenMaps
       }

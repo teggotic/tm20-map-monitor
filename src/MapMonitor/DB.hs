@@ -212,6 +212,7 @@ instance Migrate TMMap_v7 where
       }
 
 $(deriveSafeCopy 7 'extension ''TMMap_v7)
+
 data TMMap
   = TMMap
   { _tmm_tmxId :: !TMXId

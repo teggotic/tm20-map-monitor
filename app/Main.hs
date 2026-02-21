@@ -14,15 +14,17 @@ import Network.Wai.Middleware.Gzip (GzipFiles (GzipCompress), gzip, gzipFiles)
 import qualified Network.Wai.Middleware.Prometheus as P
 import qualified Prometheus as P
 import qualified Prometheus.Metric.GHC as P
-import Protolude hiding (withFile, atomically, bracket, forkIO, threadDelay, to, toList, try)
+import Protolude hiding (killThread, withFile, atomically, bracket, forkIO, threadDelay, to, toList, try)
 import RIO (MonadUnliftIO, logError, logInfo, displayShow)
 import Servant.Auth.Server
 import Servant.Server
-import UnliftIO.Concurrent (forkIO, threadDelay)
+import UnliftIO.Concurrent (forkIO, threadDelay, killThread)
 import UnliftIO.Exception (tryAny)
 import UnliftIO.STM
 
 import Options.Applicative
+import UnliftIO.Exception
+import UnliftIO.Resource
 
 data Options
   = Options
@@ -33,11 +35,9 @@ data Options
 optsP :: Parser Options
 optsP = Options <$> flag True False (long "no-scan" <> help "Disable map monitoring")
 
-main :: (MonadUnliftIO m, MonadFail m) => m ()
-main = do
-  opts <- liftIO $ execParser $ info (optsP <**> helper) mempty
-
-  acid <- liftIO $ openLocalState (MapMonitorState mempty)
+runMain :: (MonadUnliftIO m, MonadFail m) => Options -> m ()
+runMain opts = runResourceT $ do
+  (_, acid) <- allocate (liftIO $ openLocalState (MapMonitorState mempty)) (liftIO . closeAcidState)
   -- liftIO $ createCheckpoint acid
   -- liftIO $ createArchive acid
   unbeatenAtsCache <- flip runReaderT acid $ do
@@ -49,14 +49,17 @@ main = do
   checkMapFileQueue <- newTQueueIO
 
   runInApp unbeatenAtsCache beatenAtsCache acid checkMapFileQueue $ do
-    _ <- forkIO $ forever do
-      processMapFileQueue checkMapFileQueue
+    void $ flip allocateU killThread $ forkIO $ forever do
+      tryAny (processMapFileQueue checkMapFileQueue)
+        >>= \case
+          Left err -> logError $ "Error processing map file queue: " <> displayShow err
+          Right _ -> pass
 
-    _ <- forkIO $ do
+    void $ flip allocateU killThread $ forkIO $ do
       liftIO $ acidServer skipAuthenticationCheck 8082 acid
 
     when (opt_runScan opts) do
-      _ <- forkIO do
+      void $ flip allocateU killThread $ forkIO $ do
         forM_ [(0 :: Int), 20 ..] $ \i -> do
           res <- tryAny $ do
             refreshMissingInfo
@@ -95,3 +98,12 @@ main = do
         gzip (def{gzipFiles = GzipCompress}) $
           P.prometheus P.def $
             app cfg st
+
+runDev :: IO ()
+runDev = do
+  runMain $ Options False
+
+main :: (MonadUnliftIO m, MonadFail m) => m ()
+main = do
+  opts <- liftIO $ execParser $ info (optsP <**> helper) mempty
+  runMain opts

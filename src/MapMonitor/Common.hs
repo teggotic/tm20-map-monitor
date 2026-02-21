@@ -4,6 +4,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 module MapMonitor.Common (
+  AppSettingsS3 (..),
   AppSettings (..),
   HasAppSettings (..),
   HasState (..),
@@ -11,6 +12,7 @@ module MapMonitor.Common (
   HasBeatenAtsCache (..),
   HasBeatenMapPings (..),
   HasCheckMapFileQueue (..),
+  HasS3Connection (..),
   queryAcid,
   updateAcid,
   withAcid1,
@@ -31,6 +33,18 @@ import Servant.Client
 import UnliftIO.STM
 import UnliftIO.Retry
 import PingRPC
+import Network.Minio (MinioConn)
+
+data AppSettingsS3
+  = AppSettingsS3
+  { _s3_creds_access :: !Text
+  , _s3_creds_secret :: !Text
+  , _s3_creds_host :: !Text
+  , _s3_creds_bucket :: !Text
+  }
+  deriving (Generic, Show)
+
+instance FromDhall AppSettingsS3
 
 data AppSettings
   = AppSettings
@@ -38,6 +52,8 @@ data AppSettings
   , _settings_openplanetAuthSecret :: !Text
   , _settings_mapsCacheDirectory :: !(Maybe FilePath)
   , _settings_logFile :: !(Maybe FilePath)
+  , _settings_s3_creds :: !AppSettingsS3
+  -- , _settings_static :: !Text
   }
   deriving (Generic, Show)
 
@@ -62,6 +78,10 @@ class HasBeatenMapPings env where
 
 class HasCheckMapFileQueue env where
   checkMapFileQueueL :: Lens' env (TQueue TMMap)
+
+class HasS3Connection env where
+  s3ConnL :: Lens' env MinioConn
+  s3BucketL :: Lens' env Text
 
 queryAcid q =
   view stateL >>= flip query' q

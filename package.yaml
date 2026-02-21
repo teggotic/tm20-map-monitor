@@ -37,6 +37,8 @@ dependencies:
 - http-client-tls
 - servant-client
 - servant-server
+- servant-multipart
+- uuid
 - wai
 - wai-extra
 - warp
@@ -73,6 +75,8 @@ dependencies:
 - req
 - req-conduit
 - filepath
+- resourcet
+- http-media
 
 default-extensions:
 - LambdaCase
