@@ -14,7 +14,7 @@ import MapMonitor.API.XertroV
 import MapMonitor.ATCheck (checkAtSetByPlugin)
 import MapMonitor.Common
 import MapMonitor.DB
-import Protolude hiding (yield, forkIO, atomically, threadDelay)
+import Protolude hiding ((<.>), yield, forkIO, atomically, threadDelay)
 import qualified RIO.Map as Map
 import RIO.Time
 import UnliftIO
@@ -23,9 +23,15 @@ import Conduit
 import MapMonitor.API.Util
 import RIO (logInfo, HasLogFunc, displayShow, logError, logSticky, logStickyDone)
 import Data.Conduit.TQueue (sinkTQueue)
-import Control.Lens
+import Control.Lens hiding ((<.>))
 import MapMonitor.MissingItemsCheck
 import PingRPC
+import Network.HTTP.Req
+import Network.Minio
+import RIO.FilePath
+import RIO.Text (pack, unpack)
+import Network.HTTP.Req.Conduit
+import MapMonitor.MapCache
 
 tmxMapToTMMap :: TMXSearchMapsMap -> TMMap
 tmxMapToTMMap tmx =
@@ -69,7 +75,7 @@ tmxMapsSource chnkSize after = do
       when (_tmxsr_More resp) $ do
         tmxMapsSource chnkSize (Just $ _tmxsm_MapId $ last $ _tmxsr_Results resp)
 
-scanTmx :: (MonadReader env m, HasLogFunc env, HasNadeoCoreClient env, HasNadeoTokenState env, HasNadeoLiveClient env, HasNadeoRequestRate env, HasNadeoThrottler env, HasState env, HasTMXClient env, MonadFail m, MonadUnliftIO m, HasNadeoAuthToken env, HasCheckMapFileQueue env) => Maybe Int -> m ()
+scanTmx :: (MonadReader env m, HasLogFunc env, HasNadeoCoreClient env, HasNadeoTokenState env, HasNadeoLiveClient env, HasNadeoRequestRate env, HasNadeoThrottler env, HasState env, HasTMXClient env, MonadFail m, MonadUnliftIO m, HasNadeoAuthToken env, HasCheckMapFileQueue env, HasS3Connection env) => Maybe Int -> m ()
 scanTmx cntM = do
   logInfo $ "rescanning last " <> displayShow cntM <> " maps from TMX"
   runConduit $
@@ -77,11 +83,12 @@ scanTmx cntM = do
     .| maybe (mapC id) takeC cntM
     .| collectUnknownMapC
 
-collectUnknownMapC :: (MonadIO m, MonadFail m, MonadReader env m, HasState env,  HasLogFunc env, HasNadeoCoreClient env, HasNadeoTokenState env,  HasNadeoLiveClient env, HasNadeoRequestRate env,  HasNadeoThrottler env, HasNadeoAuthToken env, HasCheckMapFileQueue env) => ConduitT TMMap c m ()
+collectUnknownMapC :: ( MonadFail m, MonadReader env m, HasState env,  HasLogFunc env, HasNadeoCoreClient env, HasNadeoTokenState env,  HasNadeoLiveClient env, HasNadeoRequestRate env,  HasNadeoThrottler env, HasNadeoAuthToken env, HasCheckMapFileQueue env, MonadUnliftIO m, HasS3Connection env) =>ConduitT TMMap c m ()
 collectUnknownMapC = do
   checkMapFileQueue <- view checkMapFileQueueL
 
   mapHasNewInfoFilterMC
+    .| iterMC (void . downloadTmxMapToS3)
     .| wrapChunkedC 100 (iterMC $ updateAcid . AddNewMaps')
     .| loadNadeoMapInfoC
     .| refreshMapRecordC Nothing
@@ -127,14 +134,16 @@ mapHasNewInfoFilterMC = do
       dbmapM <- queryAcid $ GetMapById (_tmm_tmxId mp)
       case dbmapM of
         Nothing -> do
-          updateAcid $ AddNewMaps' [mp]
+          -- updateAcid $ AddNewMaps' [mp]
           return $ Just mp
         Just dbmap ->
           if isMapNewVersion mp dbmap
-             then updateAcid $ TryUpdateMapVersion mp
+             then do
+               -- updateAcid $ TryUpdateMapVersion mp
+               return $ Just mp { _tmm_mapVersions = dbmap : _tmm_mapVersions mp }
              else if _tmm_hiddenOnTmx dbmap
                then do
-                 void $ withAcid1 updateMaps [(defPatch (_tmm_tmxId mp)){_tmmp_hiddenOnTmx = Just False}]
+                 -- void $ withAcid1 updateMaps [(defPatch (_tmm_tmxId mp)){_tmmp_hiddenOnTmx = Just False}]
                  return $ Just dbmap {_tmm_hiddenOnTmx = False}
                else return Nothing
 
@@ -240,7 +249,7 @@ refreshBeatenMaps = do
   --       _ -> logError $ "Got unbeaten map marked as beaten? " <> displayShow tmmap
   -- logInfo $ displayShow (length beaten) <> " maps were beaten"
 
-addMissingMaps :: (MonadReader env m, HasTMXClient env, HasState env, HasNadeoLiveClient env, MonadFail m, HasNadeoTokenState env, HasNadeoCoreClient env, MonadUnliftIO m, HasNadeoRequestRate env, HasNadeoThrottler env, HasLogFunc env, HasNadeoAuthToken env, HasCheckMapFileQueue env) => [Int] -> m ()
+addMissingMaps :: (MonadReader env m, HasTMXClient env, HasState env, HasNadeoLiveClient env, MonadFail m, HasNadeoTokenState env, HasNadeoCoreClient env, MonadUnliftIO m, HasNadeoRequestRate env, HasNadeoThrottler env, HasLogFunc env, HasNadeoAuthToken env, HasCheckMapFileQueue env, HasS3Connection env) => [Int] -> m ()
 addMissingMaps [] = pass
 addMissingMaps ids = do
   knownIds <- queryAcid GetAllKnownIds
@@ -295,17 +304,29 @@ refreshNbPlayers = do
 
 rescanMaps :: (MonadReader env m, HasState env, MonadUnliftIO m, HasAppSettings env, HasLogFunc env) => m ()
 rescanMaps = do
-  maps <- filter (\x -> and [isNothing $ _tmm_atSetByPlugin x, isNothing $ _tmm_hiddenReason x]) <$> filterMaps ((@= HasNadeoInfo True) . (@= Unbeaten))
+  maps <- filter (\x -> isNothing (_tmm_atSetByPlugin x) && isNothing (_tmm_hiddenReason x)) <$> filterMaps ((@= HasNadeoInfo True) . (@= Unbeaten))
   print maps
 
-processMapFileQueue :: (MonadUnliftIO m, MonadReader env m, HasAppSettings env,  HasLogFunc env, HasState env, HasPubRpcSocket env) => TQueue TMMap -> m ()
+recheckTmxInfo :: (MonadReader env m, HasState env, MonadUnliftIO m, HasLogFunc env, HasTMXClient env) => m [TMMap]
+recheckTmxInfo = do
+  maps <- filterMaps ((@= HasNadeoInfo True) . (@= Unbeaten))
+  print $ length maps
+  runConduit $
+    yieldMany (fmap (_tmm_tmxId) maps)
+    .| getTmxMapC
+    .| concatC
+    .| mapHasNewInfoFilterMC
+    .| sinkList
+
+
+processMapFileQueue :: (MonadUnliftIO m, MonadReader env m,  HasLogFunc env, HasState env, HasPubRpcSocket env, HasS3Connection env) => TQueue TMMap -> m ()
 processMapFileQueue queue = do
   atomically (readTQueue queue) >>= \tmmap -> do
-    atSetByPlugin <- checkAtSetByPlugin (unTMXId $ _tmm_tmxId tmmap)
+    atSetByPlugin <- checkAtSetByPlugin tmmap
     logInfo $ "Checking AT set by plugin for map #" <> displayShow (unTMXId $ _tmm_tmxId tmmap) <> ": " <> displayShow atSetByPlugin
     Protolude.void $ withAcid1 updateMaps $ [(defPatch $ _tmm_tmxId tmmap){_tmmp_atSetByPlugin = Just atSetByPlugin}]
 
-    checkMissingItems (unTMXId $ _tmm_tmxId tmmap)
+    checkMissingItems tmmap
       >>= \case
         Just MissingItems -> do
           putText $ "Missing items detected for map " <> show (_tmm_tmxId tmmap)

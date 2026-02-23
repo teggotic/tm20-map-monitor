@@ -2,43 +2,82 @@
 module MapMonitor.MapCache
 where
 
-import Protolude
+import Protolude hiding ((<.>))
 import MapMonitor.Common
-import Control.Lens
+import Control.Lens hiding ((<.>))
 import qualified RIO.Text as Text
-import System.Process.Typed
-import RIO.Directory
 import UnliftIO
+import MapMonitor.DB
+import RIO (HasLogFunc, logError, displayShow)
+import RIO.FilePath 
+import Network.HTTP.Req
+import Network.Minio
+import RIO.Text (pack, unpack)
+import Network.HTTP.Req.Conduit
 
-getMapFile :: (MonadUnliftIO m, MonadReader env m, HasAppSettings env) => Int -> m (Maybe Text)
-getMapFile tmxId = do
-  res <- tryAny $ do
-    _settings_mapsCacheDirectory <$> view appSettingsL
-      >>= \case
-        Nothing -> do
-          withSystemTempDirectory "map-monitor-download" \dir -> do
-            let outFile = Text.pack dir <> "/" <> show tmxId <> ".Map.Gbx"
-            download outFile
-        Just dir -> do
-          let outFile = Text.pack dir <> "/" <> show tmxId <> ".Map.Gbx"
-          liftIO (doesFileExist $ Text.unpack outFile) >>= \case
-            True ->
-              return $ Just outFile
-            False -> do
-              download outFile
-  case res of
+withMapFile :: (MonadUnliftIO m, MonadReader env m, HasS3Connection env, HasLogFunc env) => TMMap -> (Text -> m a) -> m (Maybe a)
+withMapFile tmmap@(TMMap {_tmm_tmxId = TMXId tmxId, _tmm_uid = uid}) action = do
+  resE <- tryAny $ do
+    withSystemTempDirectory "map-monitor-download" \dir -> do
+      let outFile = dir </> show tmxId <.> "Map.Gbx"
+      downloadMapFile tmmap outFile >>= \case
+        Left err -> do
+          logError $ "Error: " <> displayShow err
+          return Nothing
+        Right _ -> do
+          Just <$> action (Text.pack outFile)
+
+  case resE of
     Left err -> do
-      putText $ "Error: " <> show err
+      logError $ "Error: " <> displayShow err
       return Nothing
-    Right chk -> return chk
+    Right x -> return x
 
+downloadMapFile :: (MonadUnliftIO m, MonadReader env m, HasS3Connection env, HasLogFunc env) => TMMap -> FilePath -> m (Either Text ())
+downloadMapFile tmmap@(TMMap {_tmm_uid = uid}) outFile = do
+  let mapPath = pack $ "maps/uid" </> unpack uid <.> "Map.Gbx"
+  buck <- view s3BucketL
+  conn <- view s3ConnL
+  downloadTmxMapToS3 tmmap >>= \case
+    Left err -> do
+      logError $ "Error: " <> displayShow err
+      return $ Left err
+    Right _ -> do
+      (liftIO $ runMinioWith conn $ fGetObject buck mapPath outFile defaultGetObjectOptions) >>= \case
+        Left err -> do
+          logError $ "Error: " <> displayShow err
+          return $ Left $ show err
+        Right _ -> do
+          return $ Right ()
 
- where
-   download outFile = do
-     readProcess (proc "wget" ["-O", Text.unpack outFile, "https://trackmania.exchange/maps/download/" <> show tmxId, "-U", "teggot@proton.me; unbeaten ats project"])
-       >>= \case
-          (ExitSuccess, _, _) -> do
-            return $ Just outFile
-          (ExitFailure _, _, _) -> do
-            putText $ "Failed to download map " <> show tmxId
-            return Nothing
+downloadTmxMapToS3 :: (MonadReader env m, HasS3Connection env, HasLogFunc env, MonadUnliftIO m  ) => TMMap -> m (Either Text Bool)
+downloadTmxMapToS3 (TMMap {_tmm_tmxId = TMXId tmxId, _tmm_uid = uid}) = do
+  resE <- tryAny do
+    conn <- view s3ConnL
+    buck <- view s3BucketL
+    let mapPath = (pack $ "maps/uid" </> unpack uid RIO.FilePath.<.> ".Map.Gbx")
+    statE <- liftIO $ runMinioWith conn do
+      statObject buck mapPath defaultGetObjectOptions
+    case statE of
+      Left _ -> do
+        runReq defaultHttpConfig do
+          resE <- reqBr GET (https "trackmania.exchange" /: "mapgbx" /~ tmxId) NoReqBody (header "User-Agent" "teggot@proton.me; unbeaten-maps-monitor project") $ \r -> do
+            liftIO $ runMinioWith conn $ do
+              putObject buck mapPath (responseBodySource r) Nothing defaultPutObjectOptions
+          case resE of
+            Left err -> do
+              return $ Left err
+            Right _ -> do
+              return $ Right False
+      Right _ -> do
+        return $ Right True
+  case resE of
+    Left err -> do
+      logError $ "Error: " <> displayShow err
+      return $ Left $ show err
+    Right (Left err) -> do
+      logError $ "Error: " <> displayShow err
+      return $ Left $ show err
+    Right (Right x) -> do
+      return $ Right x
+

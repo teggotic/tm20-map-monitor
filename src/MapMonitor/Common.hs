@@ -22,7 +22,6 @@ module MapMonitor.Common (
   -- lenses
   settings_auth,
   settings_openplanetAuthSecret,
-  settings_mapsCacheDirectory,
   settings_logFile,
   settings_s3_creds,
   settings_static,
@@ -76,7 +75,6 @@ data AppSettings
   = AppSettings
   { _settings_auth :: !Text
   , _settings_openplanetAuthSecret :: !Text
-  , _settings_mapsCacheDirectory :: !(Maybe FilePath)
   , _settings_logFile :: !(Maybe FilePath)
   , _settings_s3_creds :: !AppSettingsS3
   , _settings_static :: !FilePath

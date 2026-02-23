@@ -24,7 +24,7 @@ import qualified Network.HTTP.Types as H
 import Network.Wai as Wai
 import PingRPC
 import Protolude hiding (finally, threadDelay, (<.>), wait, withAsync, atomically)
-import RIO (toStrictBytes, HasLogFunc (..), LogFunc, finally)
+import RIO (toStrictBytes, HasLogFunc (..), LogFunc, finally, logError, displayShow)
 import qualified RIO.Text as Text
 import RIO.Time
 import Servant
@@ -53,6 +53,7 @@ import System.IO.Temp (withSystemTempDirectory)
 import Data.Aeson.TH (deriveFromJSON)
 import UnliftIO.Directory (removeFile)
 import Control.Concurrent.STM.TSem
+import UnliftIO.Exception (tryAny)
 
 data AppState
   = AppState
@@ -225,27 +226,31 @@ runAppState m = do
   st <- ask
   liftIO $ runReaderT m st
 
--- {"/tmp/map-monitor-validation-b6aa46134a327852/447099bd-0928-4996-8cc2-2f4c0d8b535c.Replay.Gbx":{"ValidatedResult":{"NbCheckpoints":1,"NbRespawns":0,"Time":7786,"Score":0},"IsValid":true,"Desc":null,"FileName":"a4f31d82-ed96-4001-8756-881ed8f6be95.Ghost.Gbx","MapUid":"OKbCJHQrD7IuINQPTJi0lPf8w1h"}} 
-
 htmxServer :: ServerT HtmxAPI AppM
 htmxServer = uploadFile :<|> mapByTmxId
   where
     uploadFile multipartData = do
-      runAppState do
-        host <- view $ appSettingsL . settings_s3_creds . s3_creds_host
-        flip finally (removeFile $ _vru_replay $ multipartData) $ do
-          s <- flip withAsync wait $ do
-            validateReplay multipartData >>= \case
-              Left err -> do
-                return $ "Validation failed: " <> show err
-              Right Nothing -> do
-                refreshCaches
-                return $ "Validation successful"
-              Right (Just uuid) -> do
-                refreshCaches
-                let url = "https://" <> "map-monitor-replays" <> "." <> host <> "/ghosts/" <> uuid <> ".Ghost.Gbx"
-                return $ "Validation successful <a href=\"" <> url <> "\">(ghost)</a>"
-          return $ "<div>" <> show (_vru_tmxid multipartData) <> ": " <> s <> "</div>"
+      resE <- runAppState do
+        tryAny do
+          host <- view $ appSettingsL . settings_s3_creds . s3_creds_host
+          flip finally (removeFile $ _vru_replay $ multipartData) $ do
+            s <- flip withAsync wait $ do
+              validateReplay multipartData >>= \case
+                Left err -> do
+                  return $ "Validation failed: " <> show err
+                Right Nothing -> do
+                  refreshCaches
+                  return $ "Validation successful"
+                Right (Just uuid) -> do
+                  refreshCaches
+                  let url = "https://" <> "map-monitor-replays" <> "." <> host <> "/ghosts/" <> uuid <> ".Ghost.Gbx"
+                  return $ "Validation successful <a href=\"" <> url <> "\">(ghost)</a>"
+            return $ "<div>" <> show (_vru_tmxid multipartData) <> ": " <> s <> "</div>"
+      case resE of
+        Left err -> do
+          logError $ "Error: " <> displayShow err
+          return "<div>Error</div>"
+        Right res -> return res
 
     mapByTmxId tmxidStr = do
       runAppState do

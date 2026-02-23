@@ -30,29 +30,25 @@ import Data.Acid
 import MapMonitor.DB
 import Data.Conduit.TQueue (sinkTQueue, sinkTBQueue)
 import RIO (logSticky, logStickyDone, displayShow, logError)
+import MapMonitor.MapCache
+import RIO.Prelude (error)
 
 downloadTMXMaps startId = do
   q <- newTBQueueIO 20
   runLocally $ do
-    conn <- view s3ConnL
     st <- ask
-    runReq defaultHttpConfig do
-      forM_ [(0::Int)..4] $ \_ -> do
-        void $ forkIO $ forever do
-          TMMap {_tmm_tmxId = TMXId tmxId, _tmm_uid = uid} <- atomically $ readTBQueue q
-          void $ flip runReaderT st $ do
-            logSticky $ "Downloading map: " <> displayShow tmxId
-          res <- tryAny $ do
-            reqBr GET (https "trackmania.exchange" /: "mapgbx" /~ tmxId) NoReqBody (header "User-Agent" "teggot@proton.me; unbeaten-maps-monitor project") $ \r -> do
-              liftIO $ runMinioWith conn $ do
-                putObject "tm20" (pack $ "maps/uid/" <> unpack uid <> ".Map.Gbx") (responseBodySource r) Nothing defaultPutObjectOptions
-          void $ flip runReaderT st $ do
-            case res of
-              Left err -> do
-                logStickyDone $ "Exception happened: " <> displayShow res
-              Right (Left err) ->
-                logStickyDone $ "Exception happened: " <> displayShow err
-              _ -> pass
+    forM_ [(0::Int)..4] $ \_ -> do
+      void $ forkIO $ forever do
+        tmmap@(TMMap {_tmm_tmxId = TMXId tmxId}) <- atomically $ readTBQueue q
+        void $ flip runReaderT st $ do
+          logSticky $ "Downloading map: " <> displayShow tmxId
+        void $ flip runReaderT st $ do
+          res <- downloadTmxMapToS3 tmmap
+          case res of
+            Left err -> do
+              logStickyDone $ "Exception happened: " <> displayShow err
+            Right True -> error "Found a map that was already in the cache"
+            Right False -> pass
 
     runConduit $
       tmxMapsSource 200 startId

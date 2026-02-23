@@ -1,6 +1,3 @@
 [submodule "deps/ixset-typed"]
 	path = deps/ixset-typed
 	url = git@github.com:teggotic/ixset-typed.git
-[submodule "deps/hs-connection"]
-	path = deps/hs-connection
-	url = git@teggot:teggotic/hs-connection.git

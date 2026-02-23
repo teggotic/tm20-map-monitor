@@ -23,6 +23,7 @@ import RIO (toStrictBytes, logError, displayShow, HasLogFunc, logInfo)
 import UnliftIO
 import RIO.Time (getCurrentTime)
 import Control.Concurrent.STM.TSem
+import MapMonitor.MapCache
 
 data SimulationResult
   = SimulationResult
@@ -60,13 +61,11 @@ validateReplay req = do
             return $ Left $ "Failed to extract ghost from uploaded file"
           ExitSuccess -> do
             let mapFile = dir </> (Text.unpack $ _tmm_uid tmmap) <.> "Map.Gbx"
-            let bucketPath = Text.pack $ "maps/uid" </> Text.unpack (_tmm_uid tmmap) <.> "Map.Gbx"
             conn <- view s3ConnL
-            buck <- view s3BucketL
             validationSem <- view $ syncVarsL . appSyncVars_validationSem
-            (liftIO $ runMinioWith conn $ fGetObject buck bucketPath mapFile defaultGetObjectOptions) >>= \case
+            downloadMapFile tmmap mapFile >>= \case
               Left err -> do
-                return $ Left $ "Don't have map file: " <> show err
+                return $ Left $ "Failed to download map file: " <> show err
               Right _ -> do
                 liftIO $ encodeFile (dir </> "mappings.json") (object [(fromString ghostPath, String $ _tmm_uid tmmap)])
                 bracket_ (atomically $ waitTSem $ validationSem) (atomically $ signalTSem $ validationSem) do
@@ -76,7 +75,7 @@ validateReplay req = do
                     (ExitSuccess, out, _) -> do
                       case decode @(Map Text ValidationResult) out of
                         Just (Map.lookup (toS ghostPath) -> Just res) -> do
-                          if _vr_IsValid res || maybe False ("wrong simu" `Text.isInfixOf`) (_vr_Desc res)
+                          if _vr_IsValid res || maybe False ((&&) <$> ("unexcepted walltime" `Text.isInfixOf`) <*> (not . ("wrong simu" `Text.isInfixOf`))) (_vr_Desc res)
                              then case _vr_ValidatedResult res of
                                Nothing -> return $ Left $ "Something went wrong: " <> show res
                                Just sr ->

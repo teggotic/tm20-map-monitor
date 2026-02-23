@@ -10,7 +10,8 @@ import Protolude
 import qualified RIO.Text as Text
 import UnliftIO
 import System.Process.Typed
-import RIO (tshow)
+import RIO (tshow, HasLogFunc)
+import MapMonitor.DB
 
 
 data MissingItemsReport
@@ -27,26 +28,24 @@ data MissingItemsResult
   | MissingItems
   deriving (Show)
 
-checkMissingItems :: (MonadUnliftIO m, MonadReader env m, HasAppSettings env) => Int -> m (Maybe MissingItemsResult)
-checkMissingItems tmxId = do
+checkMissingItems :: (MonadUnliftIO m, MonadReader env m, HasS3Connection env, HasLogFunc env) => TMMap -> m (Maybe MissingItemsResult)
+checkMissingItems tmmap = do
   res <- tryAny $ do
-    getMapFile tmxId
-      >>= \case
-        Nothing -> return Nothing
-        Just mapFile -> do
-          readProcessStdout (proc "EmbedsChecker" [Text.unpack mapFile]) >>= \case
-            (ExitSuccess, out) -> do
-              case decode @MissingItemsReport out of
-                Nothing -> do
-                  putText $ "Failed to parse EmbedsChecker output: " <> tshow out
-                  return Nothing
-                Just report -> do
-                  return $ Just $ bool MissingItems NoMissingItems $ _mir_hasProperlyEmbeddedBlocks report
-            (ExitFailure code, (tshow -> out)) -> do
-              putText $ show code <> "; Failed to run AT validation" <> out
+    withMapFile tmmap \mapFile -> do
+      readProcessStdout (proc "EmbedsChecker" [Text.unpack mapFile]) >>= \case
+        (ExitSuccess, out) -> do
+          case decode @MissingItemsReport out of
+            Nothing -> do
+              putText $ "Failed to parse EmbedsChecker output: " <> tshow out
               return Nothing
+            Just report -> do
+              return $ Just $ bool MissingItems NoMissingItems $ _mir_hasProperlyEmbeddedBlocks report
+        (ExitFailure code, (tshow -> out)) -> do
+          putText $ show code <> "; Failed to run AT validation" <> out
+          return Nothing
   case res of
     Left err -> do
       putText $ "Error: " <> show err
       return Nothing
-    Right chk -> return chk
+    Right (Just chk) -> return chk
+    _ -> return Nothing
