@@ -1,11 +1,12 @@
 {-# LANGUAGE NoImplicitPrelude #-}
+
 module Main (main) where
 
-import Lib
 import Data.Acid
 import Data.Acid.Remote (acidServer, skipAuthenticationCheck)
 import Data.Default.Class
 import Data.Either.Combinators
+import Lib
 import MapMonitor.DB
 import MapMonitor.Integrations
 import MapMonitor.Server
@@ -14,11 +15,11 @@ import Network.Wai.Middleware.Gzip (GzipFiles (GzipCompress), gzip, gzipFiles)
 import qualified Network.Wai.Middleware.Prometheus as P
 import qualified Prometheus as P
 import qualified Prometheus.Metric.GHC as P
-import Protolude hiding (killThread, withFile, atomically, bracket, forkIO, threadDelay, to, toList, try)
-import RIO (MonadUnliftIO, logError, logInfo, displayShow)
+import Protolude hiding (atomically, bracket, forkIO, killThread, threadDelay, to, toList, try, withFile)
+import RIO (MonadUnliftIO, displayShow, logError, logInfo)
 import Servant.Auth.Server
 import Servant.Server
-import UnliftIO.Concurrent (forkIO, threadDelay, killThread)
+import UnliftIO.Concurrent (forkIO, killThread, threadDelay)
 import UnliftIO.Exception (tryAny)
 import UnliftIO.STM
 
@@ -66,8 +67,8 @@ runMain opts = runResourceT $ do
                     then refreshRecentUnbeatenMaps
                     else pass
             if i `mod` 24 * 60 == 0
-               then Protolude.void $ scanTmx (Just 1000)
-               else Protolude.void $ scanTmx (Just 80)
+              then Protolude.void $ scanTmx (Just 1000)
+              else Protolude.void $ scanTmx (Just 80)
 
           whenLeft res $ \err ->
             logError $ "Exception happened: " <> displayShow err

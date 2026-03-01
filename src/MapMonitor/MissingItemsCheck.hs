@@ -1,18 +1,18 @@
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE NoImplicitPrelude #-}
+
 module MapMonitor.MissingItemsCheck where
 
-import MapMonitor.MapCache
-import MapMonitor.Common
 import Data.Aeson
 import Data.Aeson.TH
-import Protolude
-import qualified RIO.Text as Text
-import UnliftIO
-import System.Process.Typed
-import RIO (tshow, HasLogFunc)
+import MapMonitor.Common
 import MapMonitor.DB
-
+import MapMonitor.MapCache
+import Protolude
+import RIO (HasLogFunc, tshow)
+import qualified RIO.Text as Text
+import System.Process.Typed
+import UnliftIO
 
 data MissingItemsReport
   = MissingItemsReport

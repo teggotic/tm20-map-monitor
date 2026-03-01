@@ -1,29 +1,30 @@
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE TemplateHaskell #-}
-module MapMonitor.ReplayValidation
-  where
+{-# LANGUAGE NoImplicitPrelude #-}
 
-import MapMonitor.Integrations
-import Protolude hiding (bracket_, atomically, (<.>))
-import MapMonitor.Common
+module MapMonitor.ReplayValidation
+where
+
+import Control.Concurrent.STM.TSem
+import Control.Lens hiding ((<.>))
+import Data.Aeson
+import Data.Aeson.Key
+import Data.Aeson.TH
 import qualified Data.Map as Map
 import qualified Data.UUID.V4 as UUID4
-import qualified RIO.Text as Text
-import Data.Aeson
-import Data.Aeson.TH
-import RIO.FilePath
-import System.Process.Typed
-import UnliftIO.Temporary
-import MapMonitor.DB
 import MapMonitor.API
-import Control.Lens hiding ((<.>))
-import Network.Minio
-import Data.Aeson.Key
-import RIO (toStrictBytes, logError, displayShow, HasLogFunc, logInfo)
-import UnliftIO
-import RIO.Time (getCurrentTime)
-import Control.Concurrent.STM.TSem
+import MapMonitor.Common
+import MapMonitor.DB
+import MapMonitor.Integrations
 import MapMonitor.MapCache
+import Network.Minio
+import Protolude hiding (atomically, bracket_, (<.>))
+import RIO (HasLogFunc, displayShow, logError, logInfo, toStrictBytes)
+import RIO.FilePath
+import qualified RIO.Text as Text
+import RIO.Time (getCurrentTime)
+import System.Process.Typed
+import UnliftIO
+import UnliftIO.Temporary
 
 data SimulationResult
   = SimulationResult
@@ -38,12 +39,12 @@ $(deriveFromJSON defaultOptions{fieldLabelModifier = drop (Text.length "_sr_")} 
 
 data ValidationResult
   = ValidationResult
-    { _vr_IsValid :: !Bool
-    , _vr_Desc :: !(Maybe Text)
-    , _vr_FileName :: !Text
-    , _vr_MapUid :: !Text
-    , _vr_ValidatedResult :: !(Maybe SimulationResult)
-    }
+  { _vr_IsValid :: !Bool
+  , _vr_Desc :: !(Maybe Text)
+  , _vr_FileName :: !Text
+  , _vr_MapUid :: !Text
+  , _vr_ValidatedResult :: !(Maybe SimulationResult)
+  }
   deriving (Show)
 
 $(deriveFromJSON defaultOptions{fieldLabelModifier = drop (Text.length "_vr_")} ''ValidationResult)
@@ -76,31 +77,35 @@ validateReplay req = do
                       case decode @(Map Text ValidationResult) out of
                         Just (Map.lookup (toS ghostPath) -> Just res) -> do
                           if _vr_IsValid res || maybe False ((&&) <$> ("unexcepted walltime" `Text.isInfixOf`) <*> (not . ("wrong simu" `Text.isInfixOf`))) (_vr_Desc res)
-                             then case _vr_ValidatedResult res of
-                               Nothing -> return $ Left $ "Something went wrong: " <> show res
-                               Just sr ->
-                                 if _sr_Time sr == _tmm_authorMedal tmmap
-                                   then do
-                                     now <- getCurrentTime
-                                     case (_vru_public req) of
-                                       False -> do
-                                         void $ withAcid1 updateMaps
-                                          [ (defPatch $ _tmm_tmxId tmmap){_tmmp_validationReplay = Just $ Just (Nothing, now)}
-                                          ]
-                                         return $ Right Nothing
-                                       True -> do
-                                         uploaded <- liftIO $ runMinioWith conn do
-                                           fPutObject "map-monitor-replays" ("ghosts/" <> (show uuid) <> ".Ghost.Gbx") ghostPath defaultPutObjectOptions
-                                         case uploaded of
-                                           Left err -> do
-                                             logError $ "Error uploading replay: " <> displayShow err
-                                             return $ Right Nothing
-                                           Right _ -> do
-                                             void $ withAcid1 updateMaps
-                                              [ (defPatch $ _tmm_tmxId tmmap){_tmmp_validationReplay = Just $ Just (Just (show uuid), now)}
-                                              ]
-                                             return $ Right $ Just $ show uuid
-                                   else return $ Left $ "Replay is valid, but replay length does not match AT"
-                             else return $ Left $ "Validation failed: " <> show res
+                            then case _vr_ValidatedResult res of
+                              Nothing -> return $ Left $ "Something went wrong: " <> show res
+                              Just sr ->
+                                if _sr_Time sr <= _tmm_authorMedal tmmap
+                                  then do
+                                    now <- getCurrentTime
+                                    case (_vru_public req) of
+                                      False -> do
+                                        void $
+                                          withAcid1
+                                            updateMaps
+                                            [ (defPatch $ _tmm_tmxId tmmap){_tmmp_validationReplay = Just $ Just (Nothing, now)}
+                                            ]
+                                        return $ Right Nothing
+                                      True -> do
+                                        uploaded <- liftIO $ runMinioWith conn do
+                                          fPutObject "map-monitor-replays" ("ghosts/" <> (show uuid) <> ".Ghost.Gbx") ghostPath defaultPutObjectOptions
+                                        case uploaded of
+                                          Left err -> do
+                                            logError $ "Error uploading replay: " <> displayShow err
+                                            return $ Right Nothing
+                                          Right _ -> do
+                                            void $
+                                              withAcid1
+                                                updateMaps
+                                                [ (defPatch $ _tmm_tmxId tmmap){_tmmp_validationReplay = Just $ Just (Just (show uuid), now)}
+                                                ]
+                                            return $ Right $ Just $ show uuid
+                                  else return $ Left $ "Replay is valid, but replay length does not match AT " <> show (_sr_Time sr) <> ", expected " <> show (_tmm_authorMedal tmmap)
+                            else return $ Left $ "Validation failed: " <> show res
                         _ -> do
                           return $ Left $ "Something went wrong: " <> show out

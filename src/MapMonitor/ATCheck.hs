@@ -8,14 +8,14 @@ where
 
 import Data.Aeson
 import Data.Aeson.TH
+import MapMonitor.Common
+import MapMonitor.DB
+import MapMonitor.MapCache
 import Protolude
-import RIO (tshow, logError, displayShow, HasLogFunc)
+import RIO (HasLogFunc, displayShow, logError, tshow)
 import qualified RIO.Text as Text
 import System.Process.Typed
 import UnliftIO
-import MapMonitor.MapCache
-import MapMonitor.Common
-import MapMonitor.DB
 
 data MapValidationCheckerReport
   = MapValidationCheckerReport

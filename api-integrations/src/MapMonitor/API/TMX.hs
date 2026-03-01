@@ -1,5 +1,5 @@
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
 module MapMonitor.API.TMX (
   TMXSearchMapsFields (..),
@@ -13,13 +13,13 @@ module MapMonitor.API.TMX (
 )
 where
 
+import Control.Lens
 import Data.Aeson
 import Data.Aeson.TH
 import Protolude
 import qualified RIO.Text as Text
 import Servant.API
 import Servant.Client
-import Control.Lens
 
 class HasTMXClient env where
   tmxClientL :: Lens' env ClientEnv

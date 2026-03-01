@@ -1,24 +1,24 @@
+{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE NoImplicitPrelude #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 
 module MapMonitor.API
 where
 
-import qualified RIO.ByteString as BS
-import Network.HTTP.Media ((//), (/:))
-import Servant.Multipart
 import Data.Aeson
 import Data.Aeson.TH
 import MapMonitor.CachedAPIResponses
+import MapMonitor.DB
+import Network.HTTP.Media ((//), (/:))
+import Protolude
+import qualified RIO.ByteString as BS
 import RIO.List
 import RIO.Prelude.Types
 import qualified RIO.Text as Text
 import Servant.API
 import Servant.Auth
 import Servant.Auth.JWT
-import Protolude
-import MapMonitor.DB
+import Servant.Multipart
 
 data AUser = AUser
   { _auser_uid :: !Text
@@ -67,10 +67,10 @@ type AuthAPI =
 
 data HTML = HTML
 instance Accept HTML where
-   contentType _ = "text" // "html" /: ("charset", "utf-8")
+  contentType _ = "text" // "html" /: ("charset", "utf-8")
 
 instance MimeRender HTML Text where
-   mimeRender _ val = BS.fromStrict $ encodeUtf8 val
+  mimeRender _ val = BS.fromStrict $ encodeUtf8 val
 
 data ValidationReplayUpload
   = ValidationReplayUpload
@@ -83,16 +83,18 @@ data ValidationReplayUpload
 instance FromMultipart Tmp ValidationReplayUpload where
   fromMultipart multipartData =
     ValidationReplayUpload
-      <$> (lookupInput "tmxid" multipartData >>= \x ->
-        case readMaybe x of
-          Nothing -> Left "Invalid TMXID"
-          Just idx -> Right idx)
+      <$> ( lookupInput "tmxid" multipartData >>= \x ->
+              case readMaybe x of
+                Nothing -> Left "Invalid TMXID"
+                Just idx -> Right idx
+          )
       <*> (fdPayload <$> lookupFile "replay" multipartData)
       <*> (pure $ either (const False) (const True) $ lookupInput "public" multipartData)
 
-type HtmxAPI = "htmx" :>
-  (("upload-replay" :> MultipartForm Tmp ValidationReplayUpload :> Post '[HTML] Text)
-    :<|> ("map-by-tmxid" :> QueryParam' '[Required] "tmxid" Text :> Get '[HTML] Text)
-  )
+type HtmxAPI =
+  "htmx"
+    :> ( ("upload-replay" :> MultipartForm Tmp ValidationReplayUpload :> Post '[HTML] Text)
+           :<|> ("map-by-tmxid" :> QueryParam' '[Required] "tmxid" Text :> Get '[HTML] Text)
+       )
 
 type MapMonitorAPI = TMXApi :<|> DownloadMapAPI :<|> (Auth '[JWT] AUser :> ManagementAPI) :<|> AuthAPI :<|> ("static" :> Raw) :<|> HtmxAPI :<|> ("db-dump" :> Get '[JSON] MapMonitorState)

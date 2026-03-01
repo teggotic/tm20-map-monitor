@@ -1,10 +1,10 @@
-{-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE NoImplicitPrelude #-}
-{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE DerivingVia #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
 module MapMonitor.CachedAPIResponses (
   UnbeatenAtsResponse (..),
@@ -18,14 +18,14 @@ where
 
 import Data.Aeson
 import Data.Aeson.TH
-import MapMonitor.DB
-import RIO.List
-import RIO.Prelude.Types
 import Data.Fixed
+import GHC.Exts
 import GHC.Generics
+import MapMonitor.DB
 import Protolude
 import Protolude.Error (error)
-import GHC.Exts
+import RIO.List
+import RIO.Prelude.Types
 
 data UnbeatenAtTrack
   = UnbeatenAtTrack
@@ -49,25 +49,26 @@ data UnbeatenAtTrack
   deriving (Show, Generic)
 
 instance ToJSON UnbeatenAtTrack where
-  toJSON (UnbeatenAtTrack {..}) =
-    Array $ fromList
-      [ toJSON _uat_trackId
-      , toJSON _uat_trackUid
-      , toJSON _uat_trackName
-      , toJSON _uat_authorLogin
-      , toJSON _uat_tags
-      , toJSON _uat_mapType
-      , toJSON _uat_authorTime
-      , toJSON _uat_wr
-      , toJSON _uat_lastChecked
-      , toJSON _uat_nbPlayers
-      , toJSON _uat_isHidden
-      , toJSON _uat_reason
-      , toJSON _uat_atSetByPlugin
-      , toJSON _uat_reported
-      , toJSON _uat_uploadedTimestamp
-      , toJSON _uat_validation
-      ]
+  toJSON (UnbeatenAtTrack{..}) =
+    Array $
+      fromList
+        [ toJSON _uat_trackId
+        , toJSON _uat_trackUid
+        , toJSON _uat_trackName
+        , toJSON _uat_authorLogin
+        , toJSON _uat_tags
+        , toJSON _uat_mapType
+        , toJSON _uat_authorTime
+        , toJSON _uat_wr
+        , toJSON _uat_lastChecked
+        , toJSON _uat_nbPlayers
+        , toJSON _uat_isHidden
+        , toJSON _uat_reason
+        , toJSON _uat_atSetByPlugin
+        , toJSON _uat_reported
+        , toJSON _uat_uploadedTimestamp
+        , toJSON _uat_validation
+        ]
 
 data UnbeatenAtsResponse
   = UnbeatenAtsResponse

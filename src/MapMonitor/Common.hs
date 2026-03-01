@@ -1,7 +1,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
 module MapMonitor.Common (
   AppSyncVars (..),
@@ -33,6 +33,7 @@ module MapMonitor.Common (
 )
 where
 
+import Control.Concurrent.STM.TSem
 import Control.Lens
 import Data.Acid
 import Data.Acid.Advanced
@@ -40,13 +41,12 @@ import Data.Time
 import Dhall
 import MapMonitor.CachedAPIResponses
 import MapMonitor.DB
+import Network.Minio (MinioConn)
+import PingRPC
 import Protolude
 import Servant.Client
-import UnliftIO.STM
 import UnliftIO.Retry
-import PingRPC
-import Network.Minio (MinioConn)
-import Control.Concurrent.STM.TSem
+import UnliftIO.STM
 
 data AppSyncVars
   = AppSyncVars

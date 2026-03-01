@@ -1,5 +1,5 @@
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
 module MapMonitor.API.XertroV (
   XertrovMapMonitorNbPlayersResponse (..),
@@ -8,13 +8,13 @@ module MapMonitor.API.XertroV (
 )
 where
 
+import Control.Lens
 import Data.Aeson
 import Data.Aeson.TH
 import Protolude
 import qualified RIO.Text as Text
 import Servant.API
 import Servant.Client
-import Control.Lens
 
 class HasXertrovClient env where
   xertrovClientL :: Lens' env ClientEnv

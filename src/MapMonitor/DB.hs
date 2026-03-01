@@ -1,11 +1,11 @@
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
-{-# LANGUAGE RecordWildCards #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
 module MapMonitor.DB (
   TMMap (..),
@@ -45,21 +45,21 @@ module MapMonitor.DB (
 )
 where
 
+import Control.Lens
 import Data.Acid
 import Data.Acid.Advanced
 import Data.Aeson (FromJSON, ToJSON)
+import Data.Aeson.TH
+import Data.Aeson.Types (ToJSON (toJSON))
 import Data.IxSet.Typed hiding (fromList)
 import qualified Data.IxSet.Typed as IxSet
 import qualified Data.Map as Map
-import Control.Lens
 import Data.SafeCopy
 import Data.Time
+import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import GHC.Exts (IsList (fromList))
 import Protolude
-import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
-import Data.Aeson.TH
 import qualified RIO.Text as Text
-import Data.Aeson.Types (ToJSON(toJSON))
 
 data TMXMapType
   = MT_Race
@@ -140,7 +140,7 @@ $(deriveToJSON defaultOptions{fieldLabelModifier = drop (Text.length "_tmm_")} '
 
 instance Migrate TMMap where
   type MigrateFrom TMMap = TMMap_v8
-  migrate (TMMap_v8 {..}) =
+  migrate (TMMap_v8{..}) =
     TMMap
       { _tmm_tmxId = v8_tmm_tmxId
       , _tmm_uid = v8_tmm_uid
@@ -191,21 +191,21 @@ newtype WrTimestamp = WrTimestamp UTCTime
   deriving (Show, Eq, Ord)
 
 type TMMapIxs = '[TMXId, IsBeaten, TrackType, HiddenOnTmx, UploadedAt, HasNadeoInfo, WrTimestamp]
-type IxEntry  = IxSet TMMapIxs TMMap
+type IxEntry = IxSet TMMapIxs TMMap
 
 instance ToJSON (IxSet TMMapIxs TMMap) where
   toJSON = toJSON . IxSet.toAscList (Proxy @TMXId)
 
 instance IxSet.Indexable TMMapIxs TMMap where
-  indices = ixList
-    (ixFun $ \tmMap -> [_tmm_tmxId tmMap])
-    (ixFun $ \tmMap -> [bool Beaten Unbeaten $ isMapUnbeaten tmMap])
-    (ixFun $ \tmMap -> [TrackType $ _tmm_mapType tmMap])
-    (ixFun $ \tmMap -> [HiddenOnTmx $ _tmm_hiddenOnTmx tmMap])
-    (ixFun $ \tmMap -> catMaybes [UploadedAt <$> _tmm_uploadedAt tmMap])
-    (ixFun $ \tmMap -> [HasNadeoInfo $ isJust $ _tmm_authorUid tmMap])
-    (ixFun $ \tmMap -> maybe [] (pure . WrTimestamp . posixSecondsToUTCTime . secondsToNominalDiffTime . fromIntegral .  _tmmr_timestamp) $ _tmm_currentWR tmMap)
-
+  indices =
+    ixList
+      (ixFun $ \tmMap -> [_tmm_tmxId tmMap])
+      (ixFun $ \tmMap -> [bool Beaten Unbeaten $ isMapUnbeaten tmMap])
+      (ixFun $ \tmMap -> [TrackType $ _tmm_mapType tmMap])
+      (ixFun $ \tmMap -> [HiddenOnTmx $ _tmm_hiddenOnTmx tmMap])
+      (ixFun $ \tmMap -> catMaybes [UploadedAt <$> _tmm_uploadedAt tmMap])
+      (ixFun $ \tmMap -> [HasNadeoInfo $ isJust $ _tmm_authorUid tmMap])
+      (ixFun $ \tmMap -> maybe [] (pure . WrTimestamp . posixSecondsToUTCTime . secondsToNominalDiffTime . fromIntegral . _tmmr_timestamp) $ _tmm_currentWR tmMap)
 
 data TMMapPatch_v3
   = TMMapPatch_v3
@@ -253,7 +253,7 @@ data TMMapPatch
 
 instance Migrate TMMapPatch where
   type MigrateFrom TMMapPatch = TMMapPatch_v3
-  migrate (TMMapPatch_v3 {..}) =
+  migrate (TMMapPatch_v3{..}) =
     TMMapPatch
       { _tmmp_tmxId = v3_tmmp_tmxId
       , _tmmp_uid = v3_tmmp_uid
@@ -317,7 +317,7 @@ applyPatch patch tmMap =
         Nothing -> _tmm_reportedBy tmMap
         Just updates -> foldl' (\acc (k, val) -> Map.alter (const val) k acc) (_tmm_reportedBy tmMap) (Map.assocs updates)
     , _tmm_mapType = fromMaybe (_tmm_mapType tmMap) (_tmmp_mapType patch)
-    , _tmm_mapVersions = fromMaybe (_tmm_mapVersions tmMap) ((:_tmm_mapVersions tmMap) <$> _tmmp_mapVersions patch)
+    , _tmm_mapVersions = fromMaybe (_tmm_mapVersions tmMap) ((: _tmm_mapVersions tmMap) <$> _tmmp_mapVersions patch)
     , _tmm_hiddenOnTmx = fromMaybe (_tmm_hiddenOnTmx tmMap) (_tmmp_hiddenOnTmx patch)
     , _tmm_beatenPingSent = fromMaybe (_tmm_beatenPingSent tmMap) (_tmmp_beatenPingSent patch)
     , _tmm_validationReplay = fromMaybe (_tmm_validationReplay tmMap) (_tmmp_validationReplay patch)
@@ -336,34 +336,36 @@ $(makeLenses ''MapMonitorState)
 $(deriveSafeCopy 3 'base ''MapMonitorState)
 
 isMapNewVersion :: TMMap -> TMMap -> Bool
-isMapNewVersion mp dbmap = or
-  [ _tmm_uid dbmap /= _tmm_uid mp
-  , _tmm_authorMedal dbmap /= _tmm_authorMedal mp
-  , _tmm_mapType dbmap /= _tmm_mapType mp
-  ]
+isMapNewVersion mp dbmap =
+  or
+    [ _tmm_uid dbmap /= _tmm_uid mp
+    , _tmm_authorMedal dbmap /= _tmm_authorMedal mp
+    , _tmm_mapType dbmap /= _tmm_mapType mp
+    ]
 
 patchDB :: [TMMapPatch] -> IxEntry -> IxEntry
 patchDB [] db = db
 patchDB patches db =
   foldl' go db patches
-  where
-    go acc p =
-      case getOne (acc @= _tmmp_tmxId p) of
-        Nothing -> acc
-        Just m -> let updated = (applyPatch p m)
+ where
+  go acc p =
+    case getOne (acc @= _tmmp_tmxId p) of
+      Nothing -> acc
+      Just m ->
+        let updated = (applyPatch p m)
          in if updated == m
-               then acc
-               else IxSet.updateIx (_tmmp_tmxId p) updated acc
+              then acc
+              else IxSet.updateIx (_tmmp_tmxId p) updated acc
 
 insertMissingMaps :: [TMMap] -> IxEntry -> IxEntry
 insertMissingMaps [] db = db
 insertMissingMaps maps db =
   foldl' go db maps
-  where
-    go acc m =
-      if IxSet.null (acc @= _tmm_tmxId m)
-        then IxSet.insert m acc
-        else acc
+ where
+  go acc m =
+    if IxSet.null (acc @= _tmm_tmxId m)
+      then IxSet.insert m acc
+      else acc
 
 addNewMaps :: [(TMXId, TMMap)] -> Update MapMonitorState ()
 addNewMaps [] = pass
@@ -403,7 +405,7 @@ tryUpdateMapVersion mp = do
     Just m ->
       if isMapNewVersion mp m
         then do
-          let newMap = mp { _tmm_mapVersions = m : _tmm_mapVersions m }
+          let newMap = mp{_tmm_mapVersions = m : _tmm_mapVersions m}
           mms_maps %= IxSet.updateIx (_tmm_tmxId newMap) newMap
           return $ Just newMap
         else
@@ -423,16 +425,16 @@ getMapMonitorState = ask
 
 hideMap :: TMXId -> Text -> Update MapMonitorState ()
 hideMap tmxId reason = do
-  updateMaps' [(defPatch tmxId) { _tmmp_hiddenReason = Just $ Just reason }]
+  updateMaps' [(defPatch tmxId){_tmmp_hiddenReason = Just $ Just reason}]
 
 setAtSetByPlugin :: TMXId -> Maybe Bool -> Update MapMonitorState ()
 setAtSetByPlugin tmxId atSetByPlugin = do
-  updateMaps' [(defPatch tmxId) { _tmmp_atSetByPlugin = Just $ atSetByPlugin }]
+  updateMaps' [(defPatch tmxId){_tmmp_atSetByPlugin = Just $ atSetByPlugin}]
 
 $(makeAcidic ''MapMonitorState ['updateMaps', 'addNewMaps, 'addNewMaps', 'getMaps, 'getMapMonitorState, 'hideMap, 'setAtSetByPlugin, 'getMapsByIds, 'removeMap, 'getMapById, 'isKnownId, 'getAllKnownIds, 'tryUpdateMapVersion])
 
 updateMaps :: (MonadIO m) => AcidState MapMonitorState -> [TMMapPatch] -> m [TMMap]
-updateMaps _    [] = return []
+updateMaps _ [] = return []
 updateMaps acid patches = do
   let maps = filter (not . patchIsEmpty) patches
   if Protolude.null maps

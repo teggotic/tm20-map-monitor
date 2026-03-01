@@ -1,34 +1,34 @@
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
 module Lib where
 
-import qualified RIO.Text as T
+import Control.Concurrent.STM.TSem
+import Control.Lens.TH
 import Data.Acid
 import Data.Acid.Remote (openRemoteState, skipAuthenticationPerform)
 import Dhall
 import MapMonitor.CachedAPIResponses
-import MapMonitor.DB
 import MapMonitor.Common
+import MapMonitor.DB
 import MapMonitor.Server
 import Network.HTTP.Client as NHC (ManagerSettings (managerModifyRequest), Request (requestHeaders), newManager)
 import Network.HTTP.Client.TLS
 import Network.HTTP.Types.Header (hUserAgent)
+import Network.Minio
 import Network.Socket (PortNumber)
-import Protolude hiding (withFile, atomically, bracket, forkIO, threadDelay, to, toList, try)
-import RIO (MonadUnliftIO, newTMVarIO, withLogFunc, setLogUseTime, logOptionsHandle, withFile, hSetBuffering, BufferMode (LineBuffering), LogFunc, IsString (fromString))
+import PingRPC (withPubSocket)
+import Protolude hiding (atomically, bracket, forkIO, threadDelay, to, toList, try, withFile)
+import RIO (BufferMode (LineBuffering), IsString (fromString), LogFunc, MonadUnliftIO, hSetBuffering, logOptionsHandle, newTMVarIO, setLogUseTime, withFile, withLogFunc)
+import qualified RIO.Text as T
+import RIO.Time (getCurrentTime)
 import Servant.Auth.Server
 import Servant.Client
+import System.Directory (doesFileExist)
 import UnliftIO.Exception (bracket)
 import UnliftIO.STM
-import System.Directory (doesFileExist)
-import RIO.Time (getCurrentTime)
-import PingRPC (withPubSocket)
-import Network.Minio
-import Control.Lens.TH
-import Control.Concurrent.STM.TSem
 
 data CollectCacheState
   = CollectCacheState
@@ -53,8 +53,9 @@ runInApp acid checkMapFileQueue m = do
   beatenAtsCache <- flip runReaderT acid $ do
     collectBeatenAtsResponse >>= liftIO . newTVarIO
 
-  jwtAccessKey <- liftIO $
-    (doesFileExist "/tmp/jwt-access-key.secret") >>= Protolude.bool generateKey (readKey "/tmp/jwt-access-key.secret")
+  jwtAccessKey <-
+    liftIO $
+      (doesFileExist "/tmp/jwt-access-key.secret") >>= Protolude.bool generateKey (readKey "/tmp/jwt-access-key.secret")
   manager' <-
     liftIO $
       NHC.newManager
@@ -72,8 +73,8 @@ runInApp acid checkMapFileQueue m = do
     jwtSettings = defaultJWTSettings jwtAccessKey
     c =
       setCreds
-      (CredentialValue (AccessKey $ _s3_creds_access $ _settings_s3_creds settings) (fromString $ T.unpack $ _s3_creds_secret $ _settings_s3_creds settings) Nothing)
-      (fromString $ T.unpack $ "https://" <> (_s3_creds_host $ _settings_s3_creds settings))
+        (CredentialValue (AccessKey $ _s3_creds_access $ _settings_s3_creds settings) (fromString $ T.unpack $ _s3_creds_secret $ _settings_s3_creds settings) Nothing)
+        (fromString $ T.unpack $ "https://" <> (_s3_creds_host $ _settings_s3_creds settings))
   conn <- liftIO $ mkMinioConn c manager'
   validationSem <- atomically $ newTSem 2
   let
@@ -106,9 +107,10 @@ runInApp acid checkMapFileQueue m = do
                     , _appState_checkMapFileQueue = checkMapFileQueue
                     , _appState_s3_conn = conn
                     , _appState_s3_bucket = _s3_creds_bucket $ _settings_s3_creds settings
-                    , _appState_syncVars = AppSyncVars
-                      { _appSyncVars_validationSem = validationSem
-                      }
+                    , _appState_syncVars =
+                        AppSyncVars
+                          { _appSyncVars_validationSem = validationSem
+                          }
                     }
             runReaderT m appState
 
@@ -119,7 +121,7 @@ runInApp acid checkMapFileQueue m = do
         hSetBuffering h LineBuffering
         go h
 
-runTemporary :: ( MonadUnliftIO m) =>AcidState MapMonitorState -> ReaderT AppState m b -> m b
+runTemporary :: (MonadUnliftIO m) => AcidState MapMonitorState -> ReaderT AppState m b -> m b
 runTemporary acid m = do
   x <- newTQueueIO
   runInApp acid x m

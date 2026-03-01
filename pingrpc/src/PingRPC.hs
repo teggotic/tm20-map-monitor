@@ -1,19 +1,20 @@
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE NoImplicitPrelude #-}
+
 module PingRPC where
 
-import RIO
+import Control.Monad.Logger
 import Data.Aeson
 import Data.Aeson.TH
-import Protolude hiding (atomically, threadDelay)
-import RIO.Time
-import Network.JSONRPC
 import Data.Conduit.Network
-import Control.Monad.Logger
-import UnliftIO.STM
-import UnliftIO.Concurrent
+import Network.JSONRPC
+import Protolude hiding (atomically, threadDelay)
+import RIO
 import qualified RIO.Text as Text
+import RIO.Time
 import qualified System.ZMQ4 as ZMQ
+import UnliftIO.Concurrent
+import UnliftIO.STM
 
 data MapBeatenPing
   = MapBeatenPing
@@ -48,8 +49,8 @@ data PingRPCMessage
 $(deriveJSON defaultOptions ''PingRPCMessage)
 
 instance ToRequest PingRPCMessage where
-  requestMethod PMMapBeatenPing {} = "MapBeatenPing"
-  requestMethod PMMissingItemsMapDetectedPing {} = "MissingItemsMapDetectedPing"
+  requestMethod PMMapBeatenPing{} = "MapBeatenPing"
+  requestMethod PMMissingItemsMapDetectedPing{} = "MissingItemsMapDetectedPing"
 
   requestIsNotif _ = False
 
@@ -82,7 +83,6 @@ runPingClient q = do
       x <- atomically (readTQueue q)
       void $ sendRequest @_ @PingRPCMessage @() x
 
-
 runBroker :: (MonadIO m) => m ()
 runBroker = do
   -- withRunInIO \run -> do
@@ -93,7 +93,6 @@ runBroker = do
           ZMQ.bind xsubSock "ipc:///tmp/map-monitor-sub.sock"
           ZMQ.bind xpubSock "ipc:///tmp/map-monitor-pub.sock"
           ZMQ.proxy xsubSock xpubSock Nothing
-
 
 class HasPubRpcSocket env where
   pubRpcSocketL :: Lens' env (ZMQ.Socket ZMQ.Pub)
@@ -117,7 +116,6 @@ rpcRecv = do
   sok <- view subRpcSocketL
   msg <- liftIO $ ZMQ.receive sok
   return $ decodeStrict msg
-
 
 withPubSocket :: (MonadUnliftIO m) => (ZMQ.Socket ZMQ.Pub -> m b) -> m b
 withPubSocket inner =

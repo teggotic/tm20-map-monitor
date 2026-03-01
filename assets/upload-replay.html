@@ -8,7 +8,7 @@
       background-color: #282838;
       color: #cccccc;
     }
-    a { color: #FF0000; }
+    a { color: #ff6868; }
     .my-indicator{
         display:none;
     }
@@ -22,59 +22,61 @@
 </head>
 <body>
   <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.8/dist/htmx.min.js"></script>
-  <h1>Upload validation replay for Unbeaten ATs plugin</h1>
-  <h3>If replay is valid (after simulating using physics engine), plugin will clearly show that in the plugin (comming soon)</h3>
-    <h3 style="color: red;">
+  <div style="margin-left: 20px; margin-right: 20px;">
+    <h1>Upload validation replay for Unbeaten ATs plugin</h1>
+    <h3>If replay is valid (after simulating using physics engine), plugin will clearly show that in the plugin (comming soon)</h3>
+    <h3 style="color: #ff6868;">
       this tool relies on tm2020 dedicated server to validate replays. there are many cases when it will say replay is invalid, even if it is actually legit.
-      <br>
+      <br/>
       if you see "wrong simu" in validation result, <span style="font-style: bold;">DO NOT CONTACT ME FOR TECH SUPPORT</span>.
-      <br>
+      <br/>
       I cannot see replays files unless they get validated and you chose to make them public.
-      <br>
+      <br/>
       I cannot convince server to simulate it differently and don't plan to review clips manually.
-      <br>
+      <br/>
       I'm not accepting any replay that does not pass validation. You can choose to upload replay to tmx to make it public.
-      <br>
+      <br/>
       This tool is purely to eliviate some support burden from myself in the first place.
     </h3>
-  <form id="form" hx-post="/htmx/upload-replay" hx-encoding="multipart/form-data" hx-target="#upload-replay-result" hx-swap="beforeend" hx-indicator="#upload-indicator">
-    <div style="border: 1px solid gray; padding: 4px;">
-      TMX id:
-        <input
-          id="tmxid-input"
-          type="number"
-          name="tmxid"
-          hx-trigger="input changed delay:100ms, keyup[key=='Enter'], load delay:100ms"
-          hx-get="/htmx/map-by-tmxid"
-          hx-indicator="#map-search-indicator"
-          hx-swap="innerHTML"
-          hx-target="#map-search-result"
-        >
-        <span id="map-search-indicator" class="my-indicator">Loading...</span>
-        <span id="map-search-result"></span>
-    </div>
-    <div style="border: 1px solid gray; border-top: 0; padding: 4px;">
-      Replay file: <input type="file" name="replay">
-    </div>
-    <div style="border: 1px solid gray; border-top: 0; padding: 4px;">
-      <div>Make validation replay public: <input type="checkbox" name="public" value="yes"> </div>
-      <div style="font-size: 0.8rem;">
-        <div>If checked, I will persist replay on server and make it available for download from the plugin.</div>
-        <div>Otherwise, I will fully delete the replay file from server.</div>
-        <div>I cannot really prove it's fully removed, so its up to you to decide if you want to upload replays that you don't want to be publicly available.</div>
-        <div>Github repo is public <a href="https://github.com/teggotic/tm20-map-monitor" target="_blank">here</a> (look at ReplayValidation.hs) so you can theoretically check for yourself.</div>
-        <div>NOTE: as replays are not stored unless public, there is no option to make them public later.</div>
+    <form style="width: fit-content;" id="form" hx-post="/htmx/upload-replay" hx-encoding="multipart/form-data" hx-target="#upload-replay-result" hx-swap="beforeend" hx-indicator="#upload-indicator">
+      <div style="border: 1px solid gray; padding: 4px;">
+        TMX id:
+          <input
+            id="tmxid-input"
+            type="number"
+            name="tmxid"
+            hx-trigger="input changed delay:100ms, keyup[key=='Enter'], load delay:100ms"
+            hx-get="/htmx/map-by-tmxid"
+            hx-indicator="#map-search-indicator"
+            hx-swap="innerHTML"
+            hx-target="#map-search-result"
+          >
+          <span id="map-search-indicator" class="my-indicator">Loading...</span>
+          <span id="map-search-result"></span>
       </div>
+      <div style="border: 1px solid gray; border-top: 0; padding: 4px;">
+        Replay file: <input type="file" name="replay">
+      </div>
+      <div style="border: 1px solid gray; border-top: 0; padding: 4px;">
+        <div>Make validation replay public: <input type="checkbox" name="public" value="yes"> </div>
+        <div style="font-size: 0.8rem;">
+          <div>If checked, I will persist replay on server and make it available for download from the plugin.</div>
+          <div>Otherwise, I will fully delete the replay file from server.</div>
+          <div>I cannot really prove it's fully removed, so its up to you to decide if you want to upload replays that you don't want to be publicly available.</div>
+          <div>Github repo is public <a href="https://github.com/teggotic/tm20-map-monitor" target="_blank">here</a> (look at ReplayValidation.hs) so you can theoretically check for yourself.</div>
+          <div>NOTE: as replays are not stored unless public, there is no option to make them public later.</div>
+        </div>
+      </div>
+      <div>
+        <button>Upload</button>
+      </div>
+      <span id="upload-indicator" class="my-indicator">Loading...</span>
+    </form>
+    <div id="upload-replay-result">
     </div>
-    <div>
-      <button>Upload</button>
-    </div>
-    <span id="upload-indicator" class="my-indicator">Loading...</span>
-  </form>
-  <div id="upload-replay-result">
   </div>
   <script>
-    htmx.on("htmx:load", function(evt) {
+    window.addEventListener("load", function(evt) {
       const urlParams = new URLSearchParams(window.location.search);
 
       const mapId = urlParams.get('mapId');

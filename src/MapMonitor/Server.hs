@@ -1,59 +1,59 @@
-{-# LANGUAGE NoImplicitPrelude #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE NoImplicitPrelude #-}
 
 module MapMonitor.Server
 where
 
-import qualified Data.UUID.V4 as UUID4
-import Servant.Multipart as MP
-import Data.IxSet.Typed
-import qualified System.ZMQ4 as ZMQ
 import Control.Category (id)
+import Control.Concurrent.STM.TSem
 import Control.Lens hiding ((.=), (<.>))
 import Data.Acid
+import Data.Aeson (decode, encodeFile, object, (.=))
+import Data.Aeson.Key (fromString)
+import Data.Aeson.TH (deriveFromJSON)
+import Data.Aeson.Types
+import Data.Fixed
+import Data.IxSet.Typed
 import qualified Data.Map as Map
+import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
+import qualified Data.UUID.V4 as UUID4
 import MapMonitor.API
+import MapMonitor.API.Nadeo
 import MapMonitor.API.OpenPlanet
+import MapMonitor.API.TMX
+import MapMonitor.API.Util
+import MapMonitor.API.XertroV
 import MapMonitor.CachedAPIResponses
 import MapMonitor.Common
 import MapMonitor.DB
 import MapMonitor.Integrations
+import MapMonitor.ReplayValidation
 import qualified Network.HTTP.Types as H
+import Network.Minio
 import Network.Wai as Wai
 import PingRPC
-import Protolude hiding (finally, threadDelay, (<.>), wait, withAsync, atomically)
-import RIO (toStrictBytes, HasLogFunc (..), LogFunc, finally, logError, displayShow)
+import Protolude hiding (atomically, finally, threadDelay, wait, withAsync, (<.>))
+import RIO (HasLogFunc (..), LogFunc, displayShow, finally, logError, logInfo, toStrictBytes)
+import RIO.FilePath (takeFileName)
+import qualified RIO.Text as T
 import qualified RIO.Text as Text
 import RIO.Time
 import Servant
 import Servant.Auth.Server
-import MapMonitor.ReplayValidation
 import Servant.Client
-import UnliftIO.Concurrent
-import UnliftIO.Async
+import Servant.Multipart as MP
 import Servant.Server
-import UnliftIO.STM
-import MapMonitor.API.Nadeo
-import MapMonitor.API.XertroV
-import MapMonitor.API.TMX
-import MapMonitor.API.Util
-import Data.Fixed
-import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
-import Network.Minio
-import System.FilePath ((</>), (<.>))
-import System.Process.Typed
-import qualified RIO.Text as T
-import Data.Aeson (encodeFile, object, (.=), decode)
-import Data.Aeson.Types
-import Data.Aeson.Key (fromString)
-import RIO.FilePath (takeFileName)
+import System.FilePath ((<.>), (</>))
 import System.IO.Temp (withSystemTempDirectory)
-import Data.Aeson.TH (deriveFromJSON)
+import System.Process.Typed
+import qualified System.ZMQ4 as ZMQ
+import UnliftIO.Async
+import UnliftIO.Concurrent
 import UnliftIO.Directory (removeFile)
-import Control.Concurrent.STM.TSem
 import UnliftIO.Exception (tryAny)
+import UnliftIO.STM
 
 data AppState
   = AppState
@@ -185,7 +185,7 @@ managementApiServer (Authenticated auser) = managementReportMap :<|> managementD
     return NoContent
 
   managementDeleteReport tmxId = do
-    void $ withAcid1 updateMaps $ [(defPatch $ TMXId tmxId) {_tmmp_reportedBy = Just $ Map.fromList [(_auser_uid auser, Nothing)]}]
+    void $ withAcid1 updateMaps $ [(defPatch $ TMXId tmxId){_tmmp_reportedBy = Just $ Map.fromList [(_auser_uid auser, Nothing)]}]
     refreshCaches
     return NoContent
 
@@ -228,49 +228,52 @@ runAppState m = do
 
 htmxServer :: ServerT HtmxAPI AppM
 htmxServer = uploadFile :<|> mapByTmxId
-  where
-    uploadFile multipartData = do
-      resE <- runAppState do
-        tryAny do
-          host <- view $ appSettingsL . settings_s3_creds . s3_creds_host
-          flip finally (removeFile $ _vru_replay $ multipartData) $ do
-            s <- flip withAsync wait $ do
-              validateReplay multipartData >>= \case
-                Left err -> do
-                  return $ "Validation failed: " <> show err
-                Right Nothing -> do
-                  refreshCaches
-                  return $ "Validation successful"
-                Right (Just uuid) -> do
-                  refreshCaches
-                  let url = "https://" <> "map-monitor-replays" <> "." <> host <> "/ghosts/" <> uuid <> ".Ghost.Gbx"
-                  return $ "Validation successful <a href=\"" <> url <> "\">(ghost)</a>"
-            return $ "<div>" <> show (_vru_tmxid multipartData) <> ": " <> s <> "</div>"
-      case resE of
-        Left err -> do
-          logError $ "Error: " <> displayShow err
-          return "<div>Error</div>"
-        Right res -> return res
+ where
+  uploadFile multipartData = do
+    resE <- runAppState do
+      logInfo $ "Validating replay: " <> displayShow (_vru_tmxid multipartData)
+      tryAny do
+        host <- view $ appSettingsL . settings_s3_creds . s3_creds_host
+        flip finally (removeFile $ _vru_replay $ multipartData) $ do
+          s <- flip withAsync wait $ do
+            validateReplay multipartData >>= \case
+              Left err -> do
+                return $ "Validation failed: " <> show err
+              Right Nothing -> do
+                refreshCaches
+                return $ "Validation successful"
+              Right (Just uuid) -> do
+                refreshCaches
+                let url = "https://" <> "map-monitor-replays" <> "." <> host <> "/ghosts/" <> uuid <> ".Ghost.Gbx"
+                return $ "Validation successful <a href=\"" <> url <> "\">(ghost)</a>"
+          return $ "<div>" <> show (_vru_tmxid multipartData) <> ": " <> s <> "</div>"
+    case resE of
+      Left err -> do
+        logError $ "Error: " <> displayShow err
+        return "<div>Error</div>"
+      Right res -> do
+        logInfo $ "Validation result: " <> displayShow res
+        return res
 
-    mapByTmxId tmxidStr = do
-      runAppState do
-        case readMaybe tmxidStr of
-          Nothing -> return ""
-          Just tmxid -> do
-            dbmapM <- queryAcid $ GetMapById $ TMXId tmxid
-            case dbmapM of
-              Nothing -> return "Map not found"
-              Just dbmap -> return $ "<span>" <> show (unTMXId $ _tmm_tmxId dbmap) <> ": " <> _tmm_name dbmap <> (if isMapUnbeaten dbmap then " (unbeaten)" else " <span style=\"color: yellow;\">(beaten)</span>") <> "</span>"
+  mapByTmxId tmxidStr = do
+    runAppState do
+      case readMaybe tmxidStr of
+        Nothing -> return ""
+        Just tmxid -> do
+          dbmapM <- queryAcid $ GetMapById $ TMXId tmxid
+          case dbmapM of
+            Nothing -> return "Map not found"
+            Just dbmap -> return $ "<span>" <> show (unTMXId $ _tmm_tmxId dbmap) <> ": " <> _tmm_name dbmap <> ", " <> show (_tmm_authorMedal dbmap) <> "ms" <> (if isMapUnbeaten dbmap then " (unbeaten)" else " <span style=\"color: yellow;\">(beaten)</span>") <> "</span>"
 
 server1 :: FilePath -> ServerT MapMonitorAPI AppM
 server1 staticPath = tmxApiServer :<|> downloadMapsServer :<|> managementApiServer :<|> authApiServer :<|> staticServer :<|> htmxServer :<|> dbDump
-  where
-    staticServer = do
-      serveDirectoryWebApp staticPath
+ where
+  staticServer = do
+    serveDirectoryWebApp staticPath
 
-    dbDump = do
-      db <- queryAcid GetMapMonitorState
-      return db
+  dbDump = do
+    db <- queryAcid GetMapMonitorState
+    return db
 
 fallbackApp :: Application
 fallbackApp _ respond = do
@@ -335,26 +338,26 @@ collectUnbeatenAtsResponse = do
     unbeatenMaps =
       flip fmap allMaps $ \tmmap ->
         UnbeatenAtTrack
-        { _uat_trackId = _tmm_tmxId tmmap
-        , _uat_trackUid = _tmm_uid tmmap
-        , _uat_trackName = _tmm_name tmmap
-        , _uat_authorLogin = fromMaybe "N/A" (_tmm_authorUid tmmap)
-        , _uat_tags = Text.intercalate "," (show <$> _tmm_tags tmmap)
-        , _uat_mapType = "TM_Race"
-        , _uat_authorTime = _tmm_authorMedal tmmap
-        , _uat_wr = fromMaybe (-1) (_tmmr_time <$> _tmm_currentWR tmmap)
-        , _uat_lastChecked = 0
-        , _uat_nbPlayers = fromMaybe 123456 (_tmm_nbPlayers tmmap)
-        , _uat_isHidden = isJust (_tmm_hiddenReason tmmap)
-        , _uat_reason = fromMaybe "" (_tmm_hiddenReason tmmap)
-        , _uat_atSetByPlugin = fromMaybe False (_tmm_atSetByPlugin tmmap)
-        , _uat_reported = (\(k, (_, r)) -> (k, r)) <$> Map.assocs (_tmm_reportedBy tmmap)
-        , _uat_uploadedTimestamp = maybe 0 (nominalDiffTimeToSeconds . utcTimeToPOSIXSeconds) (_tmm_uploadedAt tmmap)
-        , _uat_validation =
-          case _tmm_validationReplay tmmap of
-            Nothing -> (False, "")
-            Just (url, _) -> (True, maybe "" (\x -> "https://" <> "map-monitor-replays" <> "." <> host <> "/ghosts/" <> x <> ".Ghost.Gbx") url)
-        }
+          { _uat_trackId = _tmm_tmxId tmmap
+          , _uat_trackUid = _tmm_uid tmmap
+          , _uat_trackName = _tmm_name tmmap
+          , _uat_authorLogin = fromMaybe "N/A" (_tmm_authorUid tmmap)
+          , _uat_tags = Text.intercalate "," (show <$> _tmm_tags tmmap)
+          , _uat_mapType = "TM_Race"
+          , _uat_authorTime = _tmm_authorMedal tmmap
+          , _uat_wr = fromMaybe (-1) (_tmmr_time <$> _tmm_currentWR tmmap)
+          , _uat_lastChecked = 0
+          , _uat_nbPlayers = fromMaybe 123456 (_tmm_nbPlayers tmmap)
+          , _uat_isHidden = isJust (_tmm_hiddenReason tmmap)
+          , _uat_reason = fromMaybe "" (_tmm_hiddenReason tmmap)
+          , _uat_atSetByPlugin = fromMaybe False (_tmm_atSetByPlugin tmmap)
+          , _uat_reported = (\(k, (_, r)) -> (k, r)) <$> Map.assocs (_tmm_reportedBy tmmap)
+          , _uat_uploadedTimestamp = maybe 0 (nominalDiffTimeToSeconds . utcTimeToPOSIXSeconds) (_tmm_uploadedAt tmmap)
+          , _uat_validation =
+              case _tmm_validationReplay tmmap of
+                Nothing -> (False, "")
+                Just (url, _) -> (True, maybe "" (\x -> "https://" <> "map-monitor-replays" <> "." <> host <> "/ghosts/" <> x <> ".Ghost.Gbx") url)
+          }
 
   return $
     UnbeatenAtsResponse

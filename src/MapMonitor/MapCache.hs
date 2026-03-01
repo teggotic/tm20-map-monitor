@@ -1,22 +1,23 @@
 {-# LANGUAGE NoImplicitPrelude #-}
+
 module MapMonitor.MapCache
 where
 
-import Protolude hiding ((<.>))
-import MapMonitor.Common
 import Control.Lens hiding ((<.>))
+import MapMonitor.Common
+import MapMonitor.DB
+import Network.HTTP.Req
+import Network.HTTP.Req.Conduit
+import Network.Minio
+import Protolude hiding ((<.>))
+import RIO (HasLogFunc, displayShow, logError)
+import RIO.FilePath
+import RIO.Text (pack, unpack)
 import qualified RIO.Text as Text
 import UnliftIO
-import MapMonitor.DB
-import RIO (HasLogFunc, logError, displayShow)
-import RIO.FilePath 
-import Network.HTTP.Req
-import Network.Minio
-import RIO.Text (pack, unpack)
-import Network.HTTP.Req.Conduit
 
 withMapFile :: (MonadUnliftIO m, MonadReader env m, HasS3Connection env, HasLogFunc env) => TMMap -> (Text -> m a) -> m (Maybe a)
-withMapFile tmmap@(TMMap {_tmm_tmxId = TMXId tmxId, _tmm_uid = uid}) action = do
+withMapFile tmmap@(TMMap{_tmm_tmxId = TMXId tmxId, _tmm_uid = uid}) action = do
   resE <- tryAny $ do
     withSystemTempDirectory "map-monitor-download" \dir -> do
       let outFile = dir </> show tmxId <.> "Map.Gbx"
@@ -34,7 +35,7 @@ withMapFile tmmap@(TMMap {_tmm_tmxId = TMXId tmxId, _tmm_uid = uid}) action = do
     Right x -> return x
 
 downloadMapFile :: (MonadUnliftIO m, MonadReader env m, HasS3Connection env, HasLogFunc env) => TMMap -> FilePath -> m (Either Text ())
-downloadMapFile tmmap@(TMMap {_tmm_uid = uid}) outFile = do
+downloadMapFile tmmap@(TMMap{_tmm_uid = uid}) outFile = do
   let mapPath = pack $ "maps/uid" </> unpack uid <.> "Map.Gbx"
   buck <- view s3BucketL
   conn <- view s3ConnL
@@ -50,8 +51,8 @@ downloadMapFile tmmap@(TMMap {_tmm_uid = uid}) outFile = do
         Right _ -> do
           return $ Right ()
 
-downloadTmxMapToS3 :: (MonadReader env m, HasS3Connection env, HasLogFunc env, MonadUnliftIO m  ) => TMMap -> m (Either Text Bool)
-downloadTmxMapToS3 (TMMap {_tmm_tmxId = TMXId tmxId, _tmm_uid = uid}) = do
+downloadTmxMapToS3 :: (MonadReader env m, HasS3Connection env, HasLogFunc env, MonadUnliftIO m) => TMMap -> m (Either Text Bool)
+downloadTmxMapToS3 (TMMap{_tmm_tmxId = TMXId tmxId, _tmm_uid = uid}) = do
   resE <- tryAny do
     conn <- view s3ConnL
     buck <- view s3BucketL
@@ -80,4 +81,3 @@ downloadTmxMapToS3 (TMMap {_tmm_tmxId = TMXId tmxId, _tmm_uid = uid}) = do
       return $ Left $ show err
     Right (Right x) -> do
       return $ Right x
-
