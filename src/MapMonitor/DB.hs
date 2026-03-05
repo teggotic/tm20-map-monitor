@@ -341,6 +341,7 @@ isMapNewVersion mp dbmap =
     [ _tmm_uid dbmap /= _tmm_uid mp
     , _tmm_authorMedal dbmap /= _tmm_authorMedal mp
     , _tmm_mapType dbmap /= _tmm_mapType mp
+    , _tmm_name dbmap /= _tmm_name mp
     ]
 
 patchDB :: [TMMapPatch] -> IxEntry -> IxEntry
@@ -403,13 +404,21 @@ tryUpdateMapVersion mp = do
   case getOne (db @= _tmm_tmxId mp) of
     Nothing -> return Nothing
     Just m ->
-      if isMapNewVersion mp m
-        then do
-          let newMap = mp{_tmm_mapVersions = m : _tmm_mapVersions m}
-          mms_maps %= IxSet.updateIx (_tmm_tmxId newMap) newMap
-          return $ Just newMap
-        else
-          return Nothing
+      if _tmm_uid m /= _tmm_uid mp || _tmm_authorMedal m /= _tmm_authorMedal mp
+      then do
+        let newMap = mp {_tmm_mapVersions = m : _tmm_mapVersions m}
+        mms_maps %= IxSet.updateIx (_tmm_tmxId newMap) newMap
+        return $ Just newMap
+      else if isMapNewVersion mp m
+      then do
+        let newMap = m
+              { _tmm_mapType = _tmm_mapType mp
+              , _tmm_name = _tmm_name mp
+              }
+        mms_maps %= IxSet.updateIx (_tmm_tmxId newMap) newMap
+        return $ Just newMap
+      else
+        return Nothing
 
 getMapsByIds :: [TMXId] -> Query MapMonitorState [TMMap]
 getMapsByIds [] = return []

@@ -59,6 +59,10 @@ runMain opts = runResourceT $ do
           res <- tryAny $ do
             refreshMissingInfo
 
+            when (i `mod` 600 == 0) do
+              recheckTmxInfo
+              recheckMapsUnhidden
+
             when (i /= 0) do
               if i `mod` 180 == 0
                 then refreshUnbeatenMaps

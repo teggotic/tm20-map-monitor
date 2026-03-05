@@ -157,7 +157,7 @@ downloadMapsServer = downloadMap
     resp $ redirectTo $ "https://trackmania.exchange/maps/download/" <> show mapId
 
 tmxApiServer :: ServerT TMXApi AppM
-tmxApiServer = unbeaten :<|> unbeatenLeaderboard :<|> beaten
+tmxApiServer = unbeaten :<|> unbeatenLeaderboard :<|> beaten :<|> unbeatenCount
  where
   beaten = do
     readTVarIO =<< view beatenAtsCacheL
@@ -173,6 +173,13 @@ tmxApiServer = unbeaten :<|> unbeatenLeaderboard :<|> beaten
 
   unbeaten = do
     readTVarIO =<< view unbeatenAtsCacheL
+
+  unbeatenCount = do
+    maps <- filterMaps ((@= (HiddenOnTmx False)) . (@= HasNadeoInfo True) . (@= (TrackType $ Just MT_Race)) . (@= Unbeaten))
+    let
+      totalUnbeaten = length maps
+      totalNonAltNadeo = length $ filter (\x -> not (49 `elem` _tmm_tags x)) maps
+    return $ "Total unbeaten: " <> show totalUnbeaten <> ", not alt nadeo: " <> show totalNonAltNadeo
 
 managementApiServer :: AuthResult AUser -> ServerT ManagementAPI AppM
 managementApiServer (Authenticated auser) = managementReportMap :<|> managementDeleteReport :<|> managementAddMissingMap

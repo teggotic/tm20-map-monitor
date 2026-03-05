@@ -45,6 +45,7 @@ type TMXApi =
     :> ( "unbeaten_ats" :> Get '[JSON] UnbeatenAtsResponse
            :<|> "unbeaten_ats" :> "leaderboard" :> Get '[JSON] UnbeatenAtsLeaderboardResponse
            :<|> "recently_beaten_ats" :> Get '[JSON] RecentlyBeatenAtsResponse
+           :<|> "unbeaten_count" :> Get '[PlainText] Text
        )
 
 data ReportMapPayload

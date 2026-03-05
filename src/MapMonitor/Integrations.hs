@@ -134,19 +134,17 @@ mapHasNewInfoFilterMC =
     dbmapM <- queryAcid $ GetMapById (_tmm_tmxId mp)
     case dbmapM of
       Nothing -> do
-        -- updateAcid $ AddNewMaps' [mp]
+        updateAcid $ AddNewMaps' [mp]
         return $ Just mp
       Just dbmap ->
         if isMapNewVersion mp dbmap
-          then do
-            -- updateAcid $ TryUpdateMapVersion mp
-            return $ Just mp{_tmm_mapVersions = dbmap : _tmm_mapVersions mp}
-          else
-            if _tmm_hiddenOnTmx dbmap
-              then do
-                -- void $ withAcid1 updateMaps [(defPatch (_tmm_tmxId mp)){_tmmp_hiddenOnTmx = Just False}]
-                return $ Just dbmap{_tmm_hiddenOnTmx = False}
-              else return Nothing
+           then updateAcid $ TryUpdateMapVersion mp
+           else if _tmm_hiddenOnTmx dbmap
+             then do
+               void $ withAcid1 updateMaps [(defPatch (_tmm_tmxId mp)){_tmmp_hiddenOnTmx = Just False}]
+               return $ Just dbmap {_tmm_hiddenOnTmx = False}
+             else return Nothing
+
 
 getMapRecord :: (MonadIO m, MonadReader env m, HasLogFunc env, HasNadeoCoreClient env, HasNadeoTokenState env, HasNadeoLiveClient env, HasNadeoRequestRate env, HasNadeoThrottler env, MonadFail m, HasNadeoAuthToken env) => TMMap -> m (TMMapPatch, TMMap)
 getMapRecord tmmap = do
@@ -306,21 +304,39 @@ refreshNbPlayers = do
         logInfo $ displayShow (_tmm_tmxId tmmap) <> ": got nb players: " <> displayShow (_xmpr_nb_players res)
         void $ withAcid1 updateMaps [(defPatch (_tmm_tmxId tmmap)){_tmmp_nbPlayers = Just $ Just (_xmpr_nb_players res)}]
 
-rescanMaps :: (MonadReader env m, HasState env, MonadUnliftIO m, HasAppSettings env, HasLogFunc env) => m ()
-rescanMaps = do
-  maps <- filter (\x -> isNothing (_tmm_atSetByPlugin x) && isNothing (_tmm_hiddenReason x)) <$> filterMaps ((@= HasNadeoInfo True) . (@= Unbeaten))
-  print maps
 
-recheckTmxInfo :: (MonadReader env m, HasState env, MonadUnliftIO m, HasLogFunc env, HasTMXClient env) => m [TMMap]
+-- rescanMaps :: (MonadReader env m, HasState env, MonadUnliftIO m, HasAppSettings env, HasLogFunc env) => m ()
+-- rescanMaps = do
+--   maps <- filterMaps ((@= HasNadeoInfo True) . (@= Unbeaten))
+--   runConduit $
+--     yieldMany maps
+--       .| mapMC (loadNadeoMapInfoC
+
+recheckTmxInfo :: (MonadReader env m, HasState env, MonadUnliftIO m, HasLogFunc env, HasTMXClient env) => m ()
 recheckTmxInfo = do
-  maps <- filterMaps ((@= HasNadeoInfo True) . (@= Unbeaten))
-  print $ length maps
-  runConduit $
+  maps <- filterMaps ((@= HiddenOnTmx False) . (@= HasNadeoInfo True) . (@= Unbeaten))
+  logInfo $ "Checking TMX info for " <> displayShow (length maps) <> " maps"
+  (updatedMaps, mapsOnTmx) <- runConduit $
+    yieldMany (fmap (_tmm_tmxId) maps)
+      .| getTmxMapC
+      .| concatC
+      .| getZipSink ((,) <$> ZipSink (mapHasNewInfoFilterMC .| sinkList) <*> ZipSink (foldlC (\a m -> Set.insert (_tmm_tmxId m) a) mempty))
+  let hiddenMaps = (fromList $ fmap _tmm_tmxId maps) Set.\\ mapsOnTmx
+  logInfo $ "Updated " <> displayShow (length updatedMaps) <> " maps"
+  logInfo $ "Hiding " <> displayShow (length hiddenMaps) <> " maps"
+  void $ withAcid1 updateMaps $ fmap (\tmxId -> (defPatch tmxId){_tmmp_hiddenOnTmx = Just True}) $ Set.toList hiddenMaps
+
+recheckMapsUnhidden :: (MonadReader env m, HasState env, MonadUnliftIO m, HasLogFunc env, HasTMXClient env) => m ()
+recheckMapsUnhidden = do
+  maps <- filterMaps ((@= HiddenOnTmx True))
+  logInfo $ "Checking TMX info for " <> displayShow (length maps) <> " maps"
+  unhidden <- runConduit $
     yieldMany (fmap (_tmm_tmxId) maps)
       .| getTmxMapC
       .| concatC
       .| mapHasNewInfoFilterMC
       .| sinkList
+  logInfo $ "Found " <> displayShow (length unhidden) <> " unhidden maps"
 
 processMapFileQueue :: (MonadUnliftIO m, MonadReader env m, HasLogFunc env, HasState env, HasPubRpcSocket env, HasS3Connection env) => TQueue TMMap -> m ()
 processMapFileQueue queue = do
