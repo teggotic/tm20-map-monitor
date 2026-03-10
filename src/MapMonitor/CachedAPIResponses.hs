@@ -96,6 +96,8 @@ data RecentlyBeatenAtsResponse
   { _rbar_keys :: ![Text]
   , _rbar_all :: !RecentlyBeatenAtsTracks
   , _rbar_below100k :: !RecentlyBeatenAtsTracks
+  , _rbar_below200k :: !RecentlyBeatenAtsTracks
+  , _rbar_below300k :: !RecentlyBeatenAtsTracks
   }
   deriving (Show)
 

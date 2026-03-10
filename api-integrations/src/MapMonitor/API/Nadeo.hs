@@ -183,6 +183,7 @@ data GetMapMultipleResponseMap
   { _gmmrm_author :: !Text
   , _gmmrm_uid :: !Text
   , _gmmrm_uploadTimestamp :: !UTCTimestamp
+  , _gmmrm_downloadUrl :: !Text
   }
   deriving (Show)
 

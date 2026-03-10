@@ -6,7 +6,9 @@
 module MapMonitor.Server
 where
 
+import Network.HTTP.Req
 import Control.Category (id)
+import qualified Prelude
 import Control.Concurrent.STM.TSem
 import Control.Lens hiding ((.=), (<.>))
 import Data.Acid
@@ -29,6 +31,7 @@ import MapMonitor.CachedAPIResponses
 import MapMonitor.Common
 import MapMonitor.DB
 import MapMonitor.Integrations
+import UnliftIO.Exception ()
 import MapMonitor.ReplayValidation
 import qualified Network.HTTP.Types as H
 import Network.Minio
@@ -42,7 +45,7 @@ import qualified RIO.Text as Text
 import RIO.Time
 import Servant
 import Servant.Auth.Server
-import Servant.Client
+import Servant.Client hiding ((/:))
 import Servant.Multipart as MP
 import Servant.Server
 import System.FilePath ((<.>), (</>))
@@ -54,6 +57,8 @@ import UnliftIO.Concurrent
 import UnliftIO.Directory (removeFile)
 import UnliftIO.Exception (tryAny)
 import UnliftIO.STM
+import Control.Exception (throw)
+import Control.Retry (limitRetries)
 
 data AppState
   = AppState
@@ -145,16 +150,59 @@ mapMonitorAPI = Proxy
 redirectTo :: Text -> Wai.Response
 redirectTo url =
   responseLBS
-    H.status301
+    H.status302
     [(H.hContentType, "text/plain"), (H.hLocation, encodeUtf8 url)]
     "Redirect"
 
-downloadMapsServer :: ServerT DownloadMapAPI AppM
-downloadMapsServer = downloadMap
+downloadMapsServer :: AppState -> ServerT DownloadMapAPI AppM
+downloadMapsServer st = downloadMap
  where
   downloadMap :: Int -> ServerT Raw AppM
-  downloadMap mapId = Tagged $ \_ resp -> do
-    resp $ redirectTo $ "https://trackmania.exchange/maps/download/" <> show mapId
+  downloadMap mapId = do
+    Tagged $ \_ resp -> do
+      tmmaps <- liftIO $ flip runReaderT st $ do
+        putText $ "Testing tmx"
+        result <- liftIO $ tryAny $
+          runReq (defaultHttpConfig {httpConfigRetryPolicy = limitRetries 0}) $
+            req Network.HTTP.Req.GET (https "trackmania.exchange" /: "mapgbx" /~ mapId) NoReqBody ignoreResponse (responseTimeout (2 * 1000000))
+        case result of
+          Left err -> do
+            putText $ "Tmx doesnot work"
+            runInClient tmxClientL (tmxSearchMaps TMXSearchMaps{_tmxsm_ids = [mapId], _tmxsm_count = Just 100, _tmxsm_after = Nothing, _tmxsm_from = Nothing, _tmxsm_order1 = Nothing})
+              >>= \case
+                Left err -> do
+                  logError $ "Error: " <> displayShow err
+                  return $ Left []
+                Right res -> do
+                  logInfo $ "Got " <> displayShow (_tmxsr_Results res)
+                  let tmmaps = tmxMapToTMMap <$> _tmxsr_Results res
+                  case tmmaps of
+                    [tmmap] -> do
+                      nadeoGetMapMultiple (IdsList [_tmm_uid tmmap])
+                        >>= \case
+                          Left err -> do
+                            logError $ "Error: " <> displayShow err
+                            return $ Left []
+                          Right res -> do
+                            logInfo $ "Got " <> displayShow (_gmmr_mapList res) <> " maps"
+                            return $ Left $ _gmmrm_downloadUrl <$> _gmmr_mapList res
+                    _ -> do
+                      return $ Left []
+          Right _ -> do
+            putText $ "TMX works"
+            return $ Right mapId
+      case tmmaps of
+        Left [tmmap] -> do
+          putText $ "Redirecting to map " <> tmmap
+          resp $ redirectTo $ tmmap
+        Right mapId -> do
+          putText $ "Redirecting to map " <> show mapId
+          resp $ redirectTo $ "https://trackmania.exchange/maps/download/" <> show mapId
+        _ -> throw err404
+          -- return $ Left tmmaps
+        -- Right _ -> do
+        --   return $ Right mapId
+        -- return tmmaps
 
 tmxApiServer :: ServerT TMXApi AppM
 tmxApiServer = unbeaten :<|> unbeatenLeaderboard :<|> beaten :<|> unbeatenCount
@@ -175,7 +223,7 @@ tmxApiServer = unbeaten :<|> unbeatenLeaderboard :<|> beaten :<|> unbeatenCount
     readTVarIO =<< view unbeatenAtsCacheL
 
   unbeatenCount = do
-    maps <- filterMaps ((@= (HiddenOnTmx False)) . (@= HasNadeoInfo True) . (@= (TrackType $ Just MT_Race)) . (@= Unbeaten))
+    maps <- filter (isNothing . _tmm_hiddenReason) <$> filterMaps ((@= (HiddenOnTmx False)) . (@= HasNadeoInfo True) . (@= (TrackType $ Just MT_Race)) . (@= Unbeaten))
     let
       totalUnbeaten = length maps
       totalNonAltNadeo = length $ filter (\x -> not (49 `elem` _tmm_tags x)) maps
@@ -272,8 +320,8 @@ htmxServer = uploadFile :<|> mapByTmxId
             Nothing -> return "Map not found"
             Just dbmap -> return $ "<span>" <> show (unTMXId $ _tmm_tmxId dbmap) <> ": " <> _tmm_name dbmap <> ", " <> show (_tmm_authorMedal dbmap) <> "ms" <> (if isMapUnbeaten dbmap then " (unbeaten)" else " <span style=\"color: yellow;\">(beaten)</span>") <> "</span>"
 
-server1 :: FilePath -> ServerT MapMonitorAPI AppM
-server1 staticPath = tmxApiServer :<|> downloadMapsServer :<|> managementApiServer :<|> authApiServer :<|> staticServer :<|> htmxServer :<|> dbDump
+server1 :: AppState -> FilePath -> ServerT MapMonitorAPI AppM
+server1 st staticPath = tmxApiServer :<|> downloadMapsServer st :<|> managementApiServer :<|> authApiServer :<|> staticServer :<|> htmxServer :<|> dbDump
  where
   staticServer = do
     serveDirectoryWebApp staticPath
@@ -297,7 +345,7 @@ app cfg state req respond = do
           mapMonitorAPI
           (Proxy :: Proxy '[CookieSettings, JWTSettings])
           (`runReaderT` state)
-          (server1 staticPath)
+          (server1 state staticPath)
   servantApp req $ \res ->
     if is404 res
       then fallbackApp req respond
@@ -315,13 +363,18 @@ collectBeatenAtsResponse = do
     beatenMaps = (@= Beaten) (_mms_maps st)
     allMaps = take 200 $ toRow <$> toDescList (Proxy @WrTimestamp) beatenMaps
     below100k = take 200 $ toRow <$> toDescList (Proxy @WrTimestamp) (beatenMaps @< TMXId 100000)
+    below200k = take 200 $ toRow <$> toDescList (Proxy @WrTimestamp) (beatenMaps @< TMXId 200000)
+    below300k = take 200 $ toRow <$> toDescList (Proxy @WrTimestamp) (beatenMaps @< TMXId 300000)
   return $
     RecentlyBeatenAtsResponse
       { _rbar_keys = ["TrackID", "TrackUID", "Track_Name", "AuthorLogin", "Tags", "MapType", "AuthorTime", "WR", "LastChecked", "ATBeatenTimestamp", "ATBeatenUsers", "NbPlayers"]
-      , _rbar_all = RecentlyBeatenAtsTracks (length allMaps) allMaps
-      , _rbar_below100k = RecentlyBeatenAtsTracks (length below100k) below100k
+      , _rbar_all = asTracks allMaps
+      , _rbar_below100k = asTracks below100k
+      , _rbar_below200k = asTracks below200k
+      , _rbar_below300k = asTracks below300k
       }
  where
+  asTracks lst = RecentlyBeatenAtsTracks (length lst) lst
   toRow tmmap =
     ( _tmm_tmxId tmmap
     , _tmm_uid tmmap
