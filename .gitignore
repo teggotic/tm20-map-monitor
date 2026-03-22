@@ -1,5 +1,5 @@
 .stack-work/
 *~
-/state/
+/state*
 /settings.dhall
 /bot-settings.dhall
