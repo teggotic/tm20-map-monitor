@@ -2,7 +2,6 @@
 
 module Main (main) where
 
-import Network.Wai.Middleware.Cors
 import Data.Acid
 import Data.Acid.Remote (acidServer, skipAuthenticationCheck)
 import Data.Default.Class
@@ -12,6 +11,7 @@ import MapMonitor.DB
 import MapMonitor.Integrations
 import MapMonitor.Server
 import Network.Wai.Handler.Warp as Warp
+import Network.Wai.Middleware.Cors
 import Network.Wai.Middleware.Gzip (GzipFiles (GzipCompress), gzip, gzipFiles)
 import qualified Network.Wai.Middleware.Prometheus as P
 import qualified Prometheus as P

@@ -6,17 +6,17 @@
 module MapMonitor.Server
 where
 
-import Data.Cache
-import Network.HTTP.Req
 import Control.Category (id)
-import qualified Prelude
 import Control.Concurrent.STM.TSem
+import Control.Exception (throw)
 import Control.Lens hiding ((.=), (<.>))
+import Control.Retry (limitRetries)
 import Data.Acid
 import Data.Aeson (decode, encodeFile, object, (.=))
 import Data.Aeson.Key (fromString)
 import Data.Aeson.TH (deriveFromJSON)
 import Data.Aeson.Types
+import Data.Cache
 import Data.Fixed
 import Data.IxSet.Typed
 import qualified Data.Map as Map
@@ -32,8 +32,8 @@ import MapMonitor.CachedAPIResponses
 import MapMonitor.Common
 import MapMonitor.DB
 import MapMonitor.Integrations
-import UnliftIO.Exception ()
 import MapMonitor.ReplayValidation
+import Network.HTTP.Req
 import qualified Network.HTTP.Types as H
 import Network.Minio
 import Network.Wai as Wai
@@ -58,8 +58,7 @@ import UnliftIO.Concurrent
 import UnliftIO.Directory (removeFile)
 import UnliftIO.Exception (tryAny)
 import UnliftIO.STM
-import Control.Exception (throw)
-import Control.Retry (limitRetries)
+import qualified Prelude
 
 data AppState
   = AppState
@@ -165,9 +164,11 @@ downloadMapsServer st = downloadMap
     Tagged $ \_ resp -> do
       tmmaps <- liftIO $ flip runReaderT st $ do
         putText $ "Testing tmx"
-        result <- liftIO $ tryAny $
-          runReq (defaultHttpConfig {httpConfigRetryPolicy = limitRetries 0}) $
-            req Network.HTTP.Req.GET (https "trackmania.exchange" /: "mapgbx" /~ mapId) NoReqBody ignoreResponse (responseTimeout (2 * 1000000))
+        result <-
+          liftIO $
+            tryAny $
+              runReq (defaultHttpConfig{httpConfigRetryPolicy = limitRetries 0}) $
+                req Network.HTTP.Req.GET (https "trackmania.exchange" /: "mapgbx" /~ mapId) NoReqBody ignoreResponse (responseTimeout (2 * 1000000))
         case result of
           Left err -> do
             putText $ "Tmx doesnot work"
@@ -202,10 +203,11 @@ downloadMapsServer st = downloadMap
           putText $ "Redirecting to map " <> show mapId
           resp $ redirectTo $ "https://trackmania.exchange/maps/download/" <> show mapId
         _ -> throw err404
-          -- return $ Left tmmaps
-        -- Right _ -> do
-        --   return $ Right mapId
-        -- return tmmaps
+
+-- return $ Left tmmaps
+-- Right _ -> do
+--   return $ Right mapId
+-- return tmmaps
 
 tmxApiServer :: ServerT TMXApi AppM
 tmxApiServer = unbeaten :<|> unbeatenLeaderboard :<|> beaten :<|> unbeatenCount

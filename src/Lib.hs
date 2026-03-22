@@ -6,10 +6,10 @@
 module Lib where
 
 import Control.Concurrent.STM.TSem
-import Data.Cache
 import Control.Lens.TH
 import Data.Acid
 import Data.Acid.Remote (openRemoteState, skipAuthenticationPerform)
+import Data.Cache
 import Dhall
 import MapMonitor.CachedAPIResponses
 import MapMonitor.Common

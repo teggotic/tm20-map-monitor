@@ -405,20 +405,22 @@ tryUpdateMapVersion mp = do
     Nothing -> return Nothing
     Just m ->
       if _tmm_uid m /= _tmm_uid mp || _tmm_authorMedal m /= _tmm_authorMedal mp
-      then do
-        let newMap = mp {_tmm_mapVersions = m : _tmm_mapVersions m}
-        mms_maps %= IxSet.updateIx (_tmm_tmxId newMap) newMap
-        return $ Just newMap
-      else if isMapNewVersion mp m
-      then do
-        let newMap = m
-              { _tmm_mapType = _tmm_mapType mp
-              , _tmm_name = _tmm_name mp
-              }
-        mms_maps %= IxSet.updateIx (_tmm_tmxId newMap) newMap
-        return $ Just newMap
-      else
-        return Nothing
+        then do
+          let newMap = mp{_tmm_mapVersions = m : _tmm_mapVersions m}
+          mms_maps %= IxSet.updateIx (_tmm_tmxId newMap) newMap
+          return $ Just newMap
+        else
+          if isMapNewVersion mp m
+            then do
+              let newMap =
+                    m
+                      { _tmm_mapType = _tmm_mapType mp
+                      , _tmm_name = _tmm_name mp
+                      }
+              mms_maps %= IxSet.updateIx (_tmm_tmxId newMap) newMap
+              return $ Just newMap
+            else
+              return Nothing
 
 getMapsByIds :: [TMXId] -> Query MapMonitorState [TMMap]
 getMapsByIds [] = return []
