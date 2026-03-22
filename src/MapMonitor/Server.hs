@@ -6,6 +6,7 @@
 module MapMonitor.Server
 where
 
+import Data.Cache
 import Network.HTTP.Req
 import Control.Category (id)
 import qualified Prelude
@@ -67,6 +68,7 @@ data AppState
   , _appState_beatenAtsCache :: !(TVar RecentlyBeatenAtsResponse)
   , _appState_coreNadeoClient :: !ClientEnv
   , _appState_liveServicesNadeoClient :: !ClientEnv
+  , _appState_trackmaniaComClient :: !ClientEnv
   , _appState_tmxClient :: !ClientEnv
   , _appState_xertrovClient :: !ClientEnv
   , _appState_openPlanetClient :: !ClientEnv
@@ -81,6 +83,7 @@ data AppState
   , _appState_s3_conn :: !MinioConn
   , _appState_s3_bucket :: !Text
   , _appState_syncVars :: !AppSyncVars
+  , _appState_displayNamesCache :: !(Cache Text Text)
   }
 
 $(makeLenses ''AppState)

@@ -13,6 +13,7 @@ module MapMonitor.API.Nadeo (
   HasNadeoTokenState (..),
   HasNadeoCoreClient (..),
   HasNadeoLiveClient (..),
+  HasTrackmaniaComClient (..),
   HasNadeoAuthToken (..),
   NadeoTokenState (..),
   nadeoGetMapLeaderboard,
@@ -20,6 +21,7 @@ module MapMonitor.API.Nadeo (
   NadeoAuthTokenResponse (..),
   NadeoBasicAuthRequestBody (..),
   HasNadeoRequestRate (..),
+  getDisplayNames,
   authorizeNadeo,
 )
 where
@@ -79,6 +81,9 @@ class HasNadeoCoreClient env where
 
 class HasNadeoLiveClient env where
   nadeoLiveClientL :: Lens' env ClientEnv
+
+class HasTrackmaniaComClient env where
+  trackmaniaComClientL :: Lens' env ClientEnv
 
 class HasNadeoAuthToken env where
   nadeoAuthTokenL :: Lens' env Text
@@ -225,6 +230,33 @@ type LiveServicesNadeoAPI =
              :> Get '[JSON] GetMapMultipleResponse
        )
 
+
+liveServicesNadeoAPI :: Proxy LiveServicesNadeoAPI
+liveServicesNadeoAPI = Proxy
+
+nadeoGetMapLeaderboard' :<|> nadeoGetMapMultiple' = client liveServicesNadeoAPI
+
+-- GET https://api.trackmania.com/api/display-names?accountId[]=5b4d42f4-c2de-407d-b367-cbff3fe817bc&accountId[]=4c803b5a-a344-4d5c-a358-d8f7455d6c85
+
+type TrackmaniaComAPI =
+  "api"
+    :> "display-names"
+    :> QueryParams "accountId" Text
+    :> Get '[JSON] (Map Text Text)
+
+
+trackmaniaComAPI :: Proxy TrackmaniaComAPI
+trackmaniaComAPI = Proxy
+
+
+getDisplayNames' = client trackmaniaComAPI
+
+
+getDisplayNames :: (MonadIO m, MonadReader s m, HasTrackmaniaComClient s, HasLogFunc s) => [Text] -> m (Either ClientError (Map Text Text))
+getDisplayNames accountIds =
+  runInClient trackmaniaComClientL $ getDisplayNames' accountIds
+
+
 withAccessToken :: (MonadFail m, MonadIO m, HasNadeoTokenState env, MonadReader env m, HasNadeoAuthToken env, HasNadeoCoreClient env, HasNadeoThrottler env, HasNadeoRequestRate env, HasLogFunc env) => (NadeoTokenHeader -> m a) -> m a
 withAccessToken m = do
   tokenStateRef <- view nadeoTokenStateL
@@ -261,10 +293,6 @@ withAccessToken m = do
               , _nadeoTokenState_refreshExpires = addUTCTime (secondsToNominalDiffTime $ 24 * 60 * 60) now
               }
 
-liveServicesNadeoAPI :: Proxy LiveServicesNadeoAPI
-liveServicesNadeoAPI = Proxy
-
-nadeoGetMapLeaderboard' :<|> nadeoGetMapMultiple' = client liveServicesNadeoAPI
 
 nadeoGetMapLeaderboard :: (MonadIO m, MonadReader s m, HasNadeoThrottler s, HasNadeoRequestRate s, HasNadeoLiveClient s, MonadFail m, HasNadeoTokenState s, HasNadeoAuthToken s, HasNadeoCoreClient s, HasLogFunc s) => Text -> Int -> m (Either ClientError GetMapLeaderboardResponse)
 nadeoGetMapLeaderboard mapUid count =

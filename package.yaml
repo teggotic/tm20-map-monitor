@@ -41,6 +41,8 @@ dependencies:
 - uuid
 - wai
 - wai-extra
+- wai-middleware-prometheus
+- wai-cors
 - warp
 - clock
 - stm
@@ -58,7 +60,6 @@ dependencies:
 - servant-auth
 - servant-auth-server
 - network
-- wai-middleware-prometheus
 - prometheus-client
 - prometheus-metrics-ghc
 - retry
@@ -77,6 +78,7 @@ dependencies:
 - filepath
 - resourcet
 - http-media
+- cache
 
 default-extensions:
 - LambdaCase

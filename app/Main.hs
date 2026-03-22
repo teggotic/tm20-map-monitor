@@ -2,6 +2,7 @@
 
 module Main (main) where
 
+import Network.Wai.Middleware.Cors
 import Data.Acid
 import Data.Acid.Remote (acidServer, skipAuthenticationCheck)
 import Data.Default.Class
@@ -94,9 +95,10 @@ runMain opts = runResourceT $ do
 
     liftIO $
       runSettings settings $
-        gzip (def{gzipFiles = GzipCompress}) $
-          P.prometheus P.def $
-            app cfg st
+        simpleCors $
+          gzip (def{gzipFiles = GzipCompress}) $
+            P.prometheus P.def $
+              app cfg st
 
 runDev :: IO ()
 runDev = do

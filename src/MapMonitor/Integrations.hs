@@ -254,9 +254,9 @@ refreshBeatenMaps = do
 addMissingMaps :: (MonadReader env m, HasTMXClient env, HasState env, HasNadeoLiveClient env, MonadFail m, HasNadeoTokenState env, HasNadeoCoreClient env, MonadUnliftIO m, HasNadeoRequestRate env, HasNadeoThrottler env, HasLogFunc env, HasNadeoAuthToken env, HasCheckMapFileQueue env, HasS3Connection env) => [Int] -> m ()
 addMissingMaps [] = pass
 addMissingMaps ids = do
-  knownIds <- queryAcid GetAllKnownIds
-  let newMaps = fromList ids `Set.difference` knownIds
-  unless (null newMaps) do
+  -- knownIds <- queryAcid GetAllKnownIds
+  -- let newMaps = fromList ids `Set.difference` knownIds
+  unless (null ids) do
     runConduit $
       yieldMany ids
         .| mapC TMXId
@@ -287,7 +287,7 @@ refreshRecentUnbeatenMaps = do
 refreshUnbeatenMaps :: (MonadFail m, MonadReader env m, HasState env, HasNadeoTokenState env, HasNadeoCoreClient env, HasNadeoLiveClient env, HasNadeoRequestRate env, HasNadeoThrottler env, HasLogFunc env, HasNadeoAuthToken env, MonadUnliftIO m) => m ()
 refreshUnbeatenMaps = do
   logInfo "Refreshing records on all unbeaten maps"
-  maps <- filterMaps ((@= HasNadeoInfo True) . (@= Unbeaten))
+  maps <- filterMaps ((@= HasNadeoInfo True) . (@= TrackType (Just MT_Race)) . (@= Unbeaten))
   runConduit $
     yieldMany maps
       .| refreshMapRecordC (Just $ length maps)
@@ -296,6 +296,7 @@ refreshUnbeatenMaps = do
 refreshNbPlayers :: (MonadReader env m, HasState env, HasXertrovClient env, MonadUnliftIO m, HasLogFunc env) => m ()
 refreshNbPlayers = do
   maps <- filter (isJust . _tmm_authorUid) <$> queryAcid GetMaps
+  -- maps <- filter (\x -> (isJust . _tmm_authorUid $ x) && (isNothing . _tmm_nbPlayers $ x)) <$> queryAcid GetMaps
   flip (pooledMapConcurrentlyN_ 4) maps \tmmap -> do
     runInClient xertrovClientL (xertrovGetNbPlayers (_tmm_uid tmmap)) >>= \case
       Left err -> do

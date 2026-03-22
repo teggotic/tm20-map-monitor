@@ -6,6 +6,7 @@
 module Lib where
 
 import Control.Concurrent.STM.TSem
+import Data.Cache
 import Control.Lens.TH
 import Data.Acid
 import Data.Acid.Remote (openRemoteState, skipAuthenticationPerform)
@@ -64,6 +65,7 @@ runInApp acid checkMapFileQueue m = do
               return req{requestHeaders = requestHeaders req <> [(hUserAgent, "teggot@proton.me; unbeaten-maps-monitor project")]}
           }
   let
+    trackmaniaComClient = (mkClientEnv manager' (BaseUrl Https "api.trackmania.com" 443 ""))
     coreNadeoClient = (mkClientEnv manager' (BaseUrl Https "prod.trackmania.core.nadeo.online" 443 ""))
     liveServicesNadeoClient = (mkClientEnv manager' (BaseUrl Https "live-services.trackmania.nadeo.live" 443 ""))
     tmxClient = (mkClientEnv manager' (BaseUrl Https "trackmania.exchange" 443 ""))
@@ -82,6 +84,8 @@ runInApp acid checkMapFileQueue m = do
       throttler <- newTMVarIO =<< getCurrentTime
       tokenStateRef <- RIO.newTMVarIO Nothing
 
+      displayNamesCache <- liftIO $ newCache (Just 86400)
+
       logOptions <- setLogUseTime True <$> logOptionsHandle h False
       withLogFunc logOptions $ \logFunc1 -> do
         logOptions' <- setLogUseTime True <$> logOptionsHandle stdout False
@@ -94,6 +98,7 @@ runInApp acid checkMapFileQueue m = do
                     , _appState_beatenAtsCache = beatenAtsCache
                     , _appState_coreNadeoClient = coreNadeoClient
                     , _appState_liveServicesNadeoClient = liveServicesNadeoClient
+                    , _appState_trackmaniaComClient = trackmaniaComClient
                     , _appState_tmxClient = tmxClient
                     , _appState_xertrovClient = xertrovClient
                     , _appState_openPlanetClient = openPlanetClient
@@ -111,6 +116,7 @@ runInApp acid checkMapFileQueue m = do
                         AppSyncVars
                           { _appSyncVars_validationSem = validationSem
                           }
+                    , _appState_displayNamesCache = displayNamesCache
                     }
             runReaderT m appState
 

@@ -60,6 +60,12 @@ main = do
   getArgs >>= \case
     ["download-all-tmx", readMaybe -> startId] -> do
       downloadTMXMaps startId
+    ["upload-notes", mapFile] -> do
+      runLocally $ do
+        conn <- view s3ConnL
+        res <- liftIO $ runMinioWith conn $ do
+          fPutObject "tm20" (T.pack $ "notes" </> takeFileName mapFile) mapFile defaultPutObjectOptions
+        print res
     ["upload-map", mapFile] -> do
       runLocally $ do
         conn <- view s3ConnL
