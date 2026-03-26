@@ -365,18 +365,18 @@ collectBeatenAtsResponse :: (MonadIO m, MonadReader env m, HasState env) => m Re
 collectBeatenAtsResponse = do
   st <- queryAcid GetMapMonitorState
   let
-    beatenMaps = (@= Beaten) (_mms_maps st)
-    allMaps = take 200 $ toRow <$> toDescList (Proxy @WrTimestamp) beatenMaps
-    below100k = take 200 $ toRow <$> toDescList (Proxy @WrTimestamp) (beatenMaps @< TMXId 100000)
-    below200k = take 200 $ toRow <$> toDescList (Proxy @WrTimestamp) (beatenMaps @< TMXId 200000)
-    below300k = take 200 $ toRow <$> toDescList (Proxy @WrTimestamp) (beatenMaps @< TMXId 300000)
+    maps = filter (not . isMapUnbeaten) $ toDescList (Proxy @WrTimestamp) $ _mms_maps st
+    allMaps = take 200 $ maps
+    below300k = take 200 $ filter ((< 300000) . _tmm_tmxId) maps
+    below200k = take 200 $ filter ((< 200000) . _tmm_tmxId) maps
+    below100k = take 200 $ filter ((< 100000) . _tmm_tmxId) maps
   return $
     RecentlyBeatenAtsResponse
       { _rbar_keys = ["TrackID", "TrackUID", "Track_Name", "AuthorLogin", "Tags", "MapType", "AuthorTime", "WR", "LastChecked", "ATBeatenTimestamp", "ATBeatenUsers", "NbPlayers"]
-      , _rbar_all = asTracks allMaps
-      , _rbar_below100k = asTracks below100k
-      , _rbar_below200k = asTracks below200k
-      , _rbar_below300k = asTracks below300k
+      , _rbar_all = asTracks $ toRow <$> allMaps
+      , _rbar_below100k = asTracks $ toRow <$> below100k
+      , _rbar_below200k = asTracks $ toRow <$> below200k
+      , _rbar_below300k = asTracks $ toRow <$> below300k
       }
  where
   asTracks lst = RecentlyBeatenAtsTracks (length lst) lst
