@@ -257,7 +257,7 @@ managementApiServer (Authenticated auser) = managementReportMap :<|> managementD
 managementApiServer _ = throwAll err404
 
 trustedUsers :: [Text]
-trustedUsers = ["c331bdbf-2182-4a51-813d-87d6f0f209c5", "65ce1935-d166-42b3-89a6-6345ccf41865", "59b84907-59fb-4455-b31d-b0cc44c36ec7", "bce4d579-dc66-43b5-9d57-eb1fb58dd450", "296a77c2-1c19-4236-9a3e-28c8c01e6312"]
+trustedUsers = ["c331bdbf-2182-4a51-813d-87d6f0f209c5", "65ce1935-d166-42b3-89a6-6345ccf41865", "59b84907-59fb-4455-b31d-b0cc44c36ec7", "bce4d579-dc66-43b5-9d57-eb1fb58dd450", "296a77c2-1c19-4236-9a3e-28c8c01e6312", "52f40bee-ef2e-44b9-baf0-067f39dbc45a"]
 
 authApiServer :: ServerT AuthAPI AppM
 authApiServer = authOpenplanetToken :<|> authIsTrusted
