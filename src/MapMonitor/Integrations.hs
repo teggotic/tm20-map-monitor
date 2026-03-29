@@ -34,33 +34,38 @@ import RIO.Time
 import UnliftIO
 import UnliftIO.Concurrent hiding (yield)
 
-tmxMapToTMMap :: TMXSearchMapsMap -> TMMap
-tmxMapToTMMap tmx =
-  TMMap
-    { _tmm_tmxId = TMXId $ _tmxsm_MapId tmx
-    , _tmm_uid = _tmxsm_MapUid tmx
-    , _tmm_name = _tmxsm_Name tmx
-    , _tmm_authorMedal = _tmxsm_Author $ _tmxsm_Medals tmx
-    , _tmm_authorUid = Nothing
-    , _tmm_currentWR = Nothing
-    , _tmm_uploadedAt = Nothing
-    , _tmm_tags = _tmxsmt_TagId <$> _tmxsm_Tags tmx
-    , _tmm_hiddenReason = Nothing
-    , _tmm_atSetByPlugin = Nothing
-    , _tmm_nbPlayers = Nothing
-    , _tmm_reportedBy = mempty
-    , _tmm_mapType = case _tmxsm_MapType tmx of
-        "TM_Race" -> Just MT_Race
-        "TM_Royal" -> Just MT_Royal
-        "TM_Stunt" -> Just MT_Stunt
-        "TM_Platform" -> Just MT_Platform
-        "Puzzle" -> Just MT_Puzzle
-        x -> Just $ MT_Other x
-    , _tmm_mapVersions = []
-    , _tmm_hiddenOnTmx = False
-    , _tmm_beatenPingSent = False
-    , _tmm_validationReplay = Nothing
-    }
+tmxMapToTMMap :: TMXSearchMapsMap -> Maybe TMMap
+tmxMapToTMMap tmx = do
+  name <- _tmxsm_Name tmx
+  mapUid <- _tmxsm_MapUid tmx
+  authorMedal <- _tmxsm_Medals tmx
+  mapType <- _tmxsm_MapType tmx
+  return
+    TMMap
+      { _tmm_tmxId = TMXId $ _tmxsm_MapId tmx
+      , _tmm_uid = mapUid
+      , _tmm_name = name
+      , _tmm_authorMedal = _tmxsm_Author $ authorMedal
+      , _tmm_authorUid = Nothing
+      , _tmm_currentWR = Nothing
+      , _tmm_uploadedAt = Nothing
+      , _tmm_tags = _tmxsmt_TagId <$> _tmxsm_Tags tmx
+      , _tmm_hiddenReason = Nothing
+      , _tmm_atSetByPlugin = Nothing
+      , _tmm_nbPlayers = Nothing
+      , _tmm_reportedBy = mempty
+      , _tmm_mapType = case mapType of
+          "TM_Race" -> Just MT_Race
+          "TM_Royal" -> Just MT_Royal
+          "TM_Stunt" -> Just MT_Stunt
+          "TM_Platform" -> Just MT_Platform
+          "Puzzle" -> Just MT_Puzzle
+          x -> Just $ MT_Other x
+      , _tmm_mapVersions = []
+      , _tmm_hiddenOnTmx = False
+      , _tmm_beatenPingSent = False
+      , _tmm_validationReplay = Nothing
+      }
 
 tmxMapsSource :: (MonadIO m, MonadReader env m, HasTMXClient env, HasLogFunc env) => Int -> Maybe Int -> ConduitT () TMMap m ()
 tmxMapsSource chnkSize after = do
@@ -71,7 +76,7 @@ tmxMapsSource chnkSize after = do
       logError $ "Error: " <> displayShow err
     Right resp -> do
       logInfo $ "Got " <> displayShow (length $ _tmxsr_Results resp) <> " maps"
-      yieldMany $ tmxMapToTMMap <$> _tmxsr_Results resp
+      yieldMany $ catMaybes $ tmxMapToTMMap <$> _tmxsr_Results resp
       threadDelay (500 * 1000)
       when (_tmxsr_More resp) $ do
         tmxMapsSource chnkSize (Just $ _tmxsm_MapId $ last $ _tmxsr_Results resp)
@@ -225,7 +230,7 @@ getTmxMapC = do
             return []
           Right res -> do
             logInfo $ "Got " <> displayShow (length $ _tmxsr_Results res) <> " maps"
-            return $ tmxMapToTMMap <$> _tmxsr_Results res
+            return $ catMaybes $ tmxMapToTMMap <$> _tmxsr_Results res
 
 refreshBeatenMaps :: (MonadReader env m) => m ()
 refreshBeatenMaps = do

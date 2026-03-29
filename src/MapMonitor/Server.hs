@@ -179,7 +179,7 @@ downloadMapsServer st = downloadMap
                   return $ Left []
                 Right res -> do
                   logInfo $ "Got " <> displayShow (_tmxsr_Results res)
-                  let tmmaps = tmxMapToTMMap <$> _tmxsr_Results res
+                  let tmmaps = catMaybes $ tmxMapToTMMap <$> _tmxsr_Results res
                   case tmmaps of
                     [tmmap] -> do
                       nadeoGetMapMultiple (IdsList [_tmm_uid tmmap])

@@ -52,11 +52,11 @@ $(deriveJSON defaultOptions{fieldLabelModifier = drop (Text.length "_tmxsmt_")} 
 data TMXSearchMapsMap
   = TMXSearchMapsMap
   { _tmxsm_MapId :: !Int
-  , _tmxsm_MapUid :: !Text
-  , _tmxsm_Name :: !Text
-  , _tmxsm_Medals :: !TMXSearchMapsMedals
+  , _tmxsm_MapUid :: !(Maybe Text)
+  , _tmxsm_Name :: !(Maybe Text)
+  , _tmxsm_Medals :: !(Maybe TMXSearchMapsMedals)
   , _tmxsm_Tags :: ![TMXSearchMapsTag]
-  , _tmxsm_MapType :: !Text
+  , _tmxsm_MapType :: !(Maybe Text)
   }
   deriving (Show)
 
