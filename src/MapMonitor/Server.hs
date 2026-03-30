@@ -207,7 +207,7 @@ downloadMapsServer st = downloadMap
 -- return tmmaps
 
 tmxApiServer :: ServerT TMXApi AppM
-tmxApiServer = unbeaten :<|> unbeatenLeaderboard :<|> beaten :<|> unbeatenCount
+tmxApiServer = unbeaten :<|> unbeatenLeaderboard :<|> beaten :<|> unbeatenCount :<|> doPurgeCache
  where
   beaten = do
     collectBeatenAtsResponse
@@ -230,6 +230,10 @@ tmxApiServer = unbeaten :<|> unbeatenLeaderboard :<|> beaten :<|> unbeatenCount
       totalUnbeaten = length maps
       totalNonAltNadeo = length $ filter (\x -> not (49 `elem` _tmm_tags x)) maps
     return $ "Total unbeaten: " <> show totalUnbeaten <> ", not alt nadeo: " <> show totalNonAltNadeo
+
+  doPurgeCache = do
+    refreshCaches
+    return NoContent
 
 managementApiServer :: AuthResult AUser -> ServerT ManagementAPI AppM
 managementApiServer (Authenticated auser) = managementReportMap :<|> managementDeleteReport :<|> managementAddMissingMap
