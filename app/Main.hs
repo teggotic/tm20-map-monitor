@@ -2,6 +2,9 @@
 
 module Main (main) where
 
+import System.Clock
+import MapMonitor.ServantCache (ResponseCache(..))
+import Data.Cache (newCache)
 import Data.Acid
 import Data.Acid.Remote (acidServer, skipAuthenticationCheck)
 import Data.Default.Class
@@ -83,13 +86,14 @@ runMain opts = runResourceT $ do
           threadDelay (20 * 60 * 1000 * 1000)
       pass
 
+    cache <- liftIO $ newCache (Just $ TimeSpec 60 0)
     st <- ask
     let
       settings =
         setPort 8081 $
           defaultSettings
       cookieCfg = defaultCookieSettings
-      cfg = cookieCfg :. (_appState_jwtSettings st) :. EmptyContext
+      cfg = cookieCfg :. (_appState_jwtSettings st) :. ResponseCache cache :. EmptyContext
 
     _ <- P.register P.ghcMetrics
 

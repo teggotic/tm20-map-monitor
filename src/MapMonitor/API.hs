@@ -19,6 +19,7 @@ import Servant.API
 import Servant.Auth
 import Servant.Auth.JWT
 import Servant.Multipart
+import MapMonitor.ServantCache
 
 data AUser = AUser
   { _auser_uid :: !Text
@@ -42,9 +43,9 @@ type DownloadMapAPI =
 
 type TMXApi =
   "tmx"
-    :> ( "unbeaten_ats" :> Get '[JSON] UnbeatenAtsResponse
+    :> ( "unbeaten_ats" :> Cached 60 UnbeatenAtsResponse :> Get '[JSON] UnbeatenAtsResponse
            :<|> "unbeaten_ats" :> "leaderboard" :> Get '[JSON] UnbeatenAtsLeaderboardResponse
-           :<|> "recently_beaten_ats" :> Get '[JSON] RecentlyBeatenAtsResponse
+           :<|> "recently_beaten_ats" :> Cached 60 RecentlyBeatenAtsResponse :> Get '[JSON] RecentlyBeatenAtsResponse
            :<|> "unbeaten_count" :> Get '[PlainText] Text
        )
 
@@ -98,4 +99,4 @@ type HtmxAPI =
            :<|> ("map-by-tmxid" :> QueryParam' '[Required] "tmxid" Text :> Get '[HTML] Text)
        )
 
-type MapMonitorAPI = TMXApi :<|> DownloadMapAPI :<|> (Auth '[JWT] AUser :> ManagementAPI) :<|> AuthAPI :<|> ("static" :> Raw) :<|> HtmxAPI :<|> ("db-dump" :> Get '[JSON] MapMonitorState)
+type MapMonitorAPI = TMXApi :<|> DownloadMapAPI :<|> (Auth '[JWT] AUser :> ManagementAPI) :<|> AuthAPI :<|> ("static" :> Raw) :<|> HtmxAPI :<|> ("db-dump" :> Cached 3600 MapMonitorState :> Get '[JSON] MapMonitorState)

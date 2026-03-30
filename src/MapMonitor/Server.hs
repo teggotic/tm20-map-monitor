@@ -59,6 +59,7 @@ import UnliftIO.Directory (removeFile)
 import UnliftIO.Exception (tryAny)
 import UnliftIO.STM
 import qualified Prelude
+import MapMonitor.ServantCache (ResponseCache)
 
 data AppState
   = AppState
@@ -339,7 +340,7 @@ fallbackApp :: Application
 fallbackApp _ respond = do
   respond $ responseLBS H.status404 [] ";...;"
 
-app :: Servant.Server.Context '[CookieSettings, JWTSettings] -> AppState -> Application
+app :: Servant.Server.Context '[CookieSettings, JWTSettings, ResponseCache] -> AppState -> Application
 app cfg state req respond = do
   -- putText $ "Request: " <> show req
   let
@@ -348,7 +349,7 @@ app cfg state req respond = do
       serveWithContext mapMonitorAPI cfg $
         hoistServerWithContext
           mapMonitorAPI
-          (Proxy :: Proxy '[CookieSettings, JWTSettings])
+          (Proxy :: Proxy '[CookieSettings, JWTSettings, ResponseCache])
           (`runReaderT` state)
           (server1 state staticPath)
   servantApp req $ \res ->
