@@ -40,6 +40,7 @@ library
       MapMonitor.MapCache
       MapMonitor.MissingItemsCheck
       MapMonitor.ReplayValidation
+      MapMonitor.ServantCache
       MapMonitor.Server
   other-modules:
       Paths_map_monitor
@@ -67,6 +68,7 @@ library
     , async-pool
     , barbies
     , base >=4.7 && <5
+    , bytestring
     , cache
     , cereal
     , clock
@@ -149,6 +151,7 @@ executable map-monitor-exe
     , async-pool
     , barbies
     , base >=4.7 && <5
+    , bytestring
     , cache
     , cereal
     , clock
@@ -237,6 +240,7 @@ executable map-monitor-ping-bot-exe
     , async-pool
     , barbies
     , base >=4.7 && <5
+    , bytestring
     , cache
     , cereal
     , clock
@@ -325,6 +329,7 @@ executable map-monitor-ttt-exe
     , async-pool
     , barbies
     , base >=4.7 && <5
+    , bytestring
     , cache
     , cereal
     , clock
@@ -413,6 +418,7 @@ executable map-monitor-zmq-exe
     , async-pool
     , barbies
     , base >=4.7 && <5
+    , bytestring
     , cache
     , cereal
     , clock
@@ -501,6 +507,7 @@ test-suite map-monitor-test
     , async-pool
     , barbies
     , base >=4.7 && <5
+    , bytestring
     , cache
     , cereal
     , clock

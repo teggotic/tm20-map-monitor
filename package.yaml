@@ -79,6 +79,7 @@ dependencies:
 - resourcet
 - http-media
 - cache
+- bytestring
 
 default-extensions:
 - LambdaCase

@@ -59,13 +59,11 @@ import UnliftIO.Directory (removeFile)
 import UnliftIO.Exception (tryAny)
 import UnliftIO.STM
 import qualified Prelude
-import MapMonitor.ServantCache (ResponseCache)
+import MapMonitor.ServantCache (ResponseCache(..))
 
 data AppState
   = AppState
   { _appState_acid :: !(AcidState MapMonitorState)
-  , _appState_unbeatenAtsCache :: !(TVar UnbeatenAtsResponse)
-  , _appState_beatenAtsCache :: !(TVar RecentlyBeatenAtsResponse)
   , _appState_coreNadeoClient :: !ClientEnv
   , _appState_liveServicesNadeoClient :: !ClientEnv
   , _appState_trackmaniaComClient :: !ClientEnv
@@ -84,6 +82,7 @@ data AppState
   , _appState_s3_bucket :: !Text
   , _appState_syncVars :: !AppSyncVars
   , _appState_displayNamesCache :: !(Cache Text Text)
+  , _appState_responseCache :: !ResponseCache
   }
 
 $(makeLenses ''AppState)
@@ -121,12 +120,6 @@ instance HasOpenPlanetClient AppState where
 instance HasNadeoTokenState AppState where
   nadeoTokenStateL = appState_nadeoToken
 
-instance HasUnbeatenAtsCache AppState where
-  unbeatenAtsCacheL = appState_unbeatenAtsCache
-
-instance HasBeatenAtsCache AppState where
-  beatenAtsCacheL = appState_beatenAtsCache
-
 instance HasNadeoThrottler AppState where
   nadeoThrottlerL = appState_nadeoThrottler
 
@@ -145,6 +138,9 @@ instance HasCheckMapFileQueue AppState where
 instance HasS3Connection AppState where
   s3ConnL = appState_s3_conn
   s3BucketL = appState_s3_bucket
+
+instance HasResponseCache AppState where
+  responseCacheL = appState_responseCache
 
 type AppM = ReaderT AppState Servant.Server.Handler
 
@@ -214,7 +210,7 @@ tmxApiServer :: ServerT TMXApi AppM
 tmxApiServer = unbeaten :<|> unbeatenLeaderboard :<|> beaten :<|> unbeatenCount
  where
   beaten = do
-    readTVarIO =<< view beatenAtsCacheL
+    collectBeatenAtsResponse
 
   unbeatenLeaderboard = do
     return $
@@ -226,7 +222,7 @@ tmxApiServer = unbeaten :<|> unbeatenLeaderboard :<|> beaten :<|> unbeatenCount
         }
 
   unbeaten = do
-    readTVarIO =<< view unbeatenAtsCacheL
+    collectUnbeatenAtsResponse
 
   unbeatenCount = do
     maps <- filter (isNothing . _tmm_hiddenReason) <$> filterMaps ((@= (HiddenOnTmx False)) . (@= HasNadeoInfo True) . (@= (TrackType $ Just MT_Race)) . (@= Unbeaten))
@@ -432,9 +428,7 @@ collectUnbeatenAtsResponse = do
       , _uar_nbTracks = length unbeatenMaps
       }
 
-refreshCaches :: (MonadIO m, MonadReader env m, HasState env, HasBeatenAtsCache env, HasUnbeatenAtsCache env, HasAppSettings env) => m ()
+refreshCaches :: (MonadIO m, MonadReader env m, HasResponseCache env) => m ()
 refreshCaches = do
-  view unbeatenAtsCacheL >>= \c ->
-    atomically . writeTVar c =<< collectUnbeatenAtsResponse
-  view beatenAtsCacheL >>= \c ->
-    atomically . writeTVar c =<< collectBeatenAtsResponse
+  ResponseCache cache <- view responseCacheL
+  liftIO $ purge cache

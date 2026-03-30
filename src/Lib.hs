@@ -30,6 +30,8 @@ import Servant.Client
 import System.Directory (doesFileExist)
 import UnliftIO.Exception (bracket)
 import UnliftIO.STM
+import System.Clock
+import MapMonitor.ServantCache
 
 data CollectCacheState
   = CollectCacheState
@@ -49,10 +51,7 @@ runInApp :: (MonadUnliftIO m) => AcidState MapMonitorState -> TQueue TMMap -> Re
 runInApp acid checkMapFileQueue m = do
   settings <- liftIO $ input auto "./settings.dhall"
 
-  unbeatenAtsCache <- flip runReaderT (CollectCacheState acid settings) $ do
-    collectUnbeatenAtsResponse >>= liftIO . newTVarIO
-  beatenAtsCache <- flip runReaderT acid $ do
-    collectBeatenAtsResponse >>= liftIO . newTVarIO
+  cache <- liftIO $ newCache (Just $ TimeSpec 60 0)
 
   jwtAccessKey <-
     liftIO $
@@ -94,8 +93,6 @@ runInApp acid checkMapFileQueue m = do
             let appState =
                   AppState
                     { _appState_acid = acid
-                    , _appState_unbeatenAtsCache = unbeatenAtsCache
-                    , _appState_beatenAtsCache = beatenAtsCache
                     , _appState_coreNadeoClient = coreNadeoClient
                     , _appState_liveServicesNadeoClient = liveServicesNadeoClient
                     , _appState_trackmaniaComClient = trackmaniaComClient
@@ -117,6 +114,7 @@ runInApp acid checkMapFileQueue m = do
                           { _appSyncVars_validationSem = validationSem
                           }
                     , _appState_displayNamesCache = displayNamesCache
+                    , _appState_responseCache = ResponseCache cache
                     }
             runReaderT m appState
 

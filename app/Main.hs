@@ -2,9 +2,6 @@
 
 module Main (main) where
 
-import System.Clock
-import MapMonitor.ServantCache (ResponseCache(..))
-import Data.Cache (newCache)
 import Data.Acid
 import Data.Acid.Remote (acidServer, skipAuthenticationCheck)
 import Data.Default.Class
@@ -24,12 +21,15 @@ import RIO (MonadUnliftIO, displayShow, logError, logInfo)
 import Servant.Auth.Server
 import Servant.Server
 import UnliftIO.Concurrent (forkIO, killThread, threadDelay)
-import UnliftIO.Exception (tryAny)
 import UnliftIO.STM
 
 import Options.Applicative
 import UnliftIO.Exception
 import UnliftIO.Resource
+import MapMonitor.ServantCache
+import Control.Lens (view)
+import MapMonitor.Common
+import Data.Cache (toList)
 
 data Options
   = Options
@@ -43,8 +43,6 @@ optsP = Options <$> flag True False (long "no-scan" <> help "Disable map monitor
 runMain :: (MonadUnliftIO m, MonadFail m) => Options -> m ()
 runMain opts = runResourceT $ do
   (_, acid) <- allocate (liftIO $ openLocalState (MapMonitorState mempty)) (liftIO . closeAcidState)
-  -- liftIO $ createCheckpoint acid
-  -- liftIO $ createArchive acid
   checkMapFileQueue <- newTQueueIO
 
   runInApp acid checkMapFileQueue $ do
@@ -53,6 +51,7 @@ runMain opts = runResourceT $ do
         >>= \case
           Left err -> logError $ "Error processing map file queue: " <> displayShow err
           Right _ -> pass
+      refreshCaches
 
     void $ flip allocateU killThread $ forkIO $ do
       liftIO $ acidServer skipAuthenticationCheck 8082 acid
@@ -86,14 +85,13 @@ runMain opts = runResourceT $ do
           threadDelay (20 * 60 * 1000 * 1000)
       pass
 
-    cache <- liftIO $ newCache (Just $ TimeSpec 60 0)
     st <- ask
     let
       settings =
         setPort 8081 $
           defaultSettings
       cookieCfg = defaultCookieSettings
-      cfg = cookieCfg :. (_appState_jwtSettings st) :. ResponseCache cache :. EmptyContext
+      cfg = cookieCfg :. (_appState_jwtSettings st) :. (_appState_responseCache st) :. EmptyContext
 
     _ <- P.register P.ghcMetrics
 

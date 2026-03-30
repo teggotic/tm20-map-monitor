@@ -10,11 +10,10 @@ module MapMonitor.Common (
   AppSettings (..),
   HasAppSettings (..),
   HasState (..),
-  HasUnbeatenAtsCache (..),
-  HasBeatenAtsCache (..),
   HasBeatenMapPings (..),
   HasCheckMapFileQueue (..),
   HasS3Connection (..),
+  HasResponseCache (..),
   queryAcid,
   updateAcid,
   withAcid1,
@@ -47,6 +46,7 @@ import Protolude
 import Servant.Client
 import UnliftIO.Retry
 import UnliftIO.STM
+import MapMonitor.ServantCache (ResponseCache)
 
 data AppSyncVars
   = AppSyncVars
@@ -91,12 +91,6 @@ class HasAppSettings env where
 class HasState a where
   stateL :: Lens' a (AcidState MapMonitorState)
 
-class HasUnbeatenAtsCache env where
-  unbeatenAtsCacheL :: Lens' env (TVar UnbeatenAtsResponse)
-
-class HasBeatenAtsCache env where
-  beatenAtsCacheL :: Lens' env (TVar RecentlyBeatenAtsResponse)
-
 class HasBeatenMapPings env where
   beatenMapPingsL :: Lens' env (TQueue PingRPCMessage)
 
@@ -106,6 +100,9 @@ class HasCheckMapFileQueue env where
 class HasS3Connection env where
   s3ConnL :: Lens' env MinioConn
   s3BucketL :: Lens' env Text
+
+class HasResponseCache env where
+  responseCacheL :: Lens' env ResponseCache
 
 queryAcid q =
   view stateL >>= flip query' q
