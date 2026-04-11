@@ -46,18 +46,18 @@ runMain opts = runResourceT $ do
   checkMapFileQueue <- newTQueueIO
 
   runInApp acid checkMapFileQueue $ do
-    void $ flip allocateU killThread $ forkIO $ forever do
+    spawnThread $ forever do
       tryAny (processMapFileQueue checkMapFileQueue)
         >>= \case
           Left err -> logError $ "Error processing map file queue: " <> displayShow err
           Right _ -> pass
       refreshCaches
 
-    void $ flip allocateU killThread $ forkIO $ do
+    spawnThread do
       liftIO $ acidServer skipAuthenticationCheck 8082 acid
 
     when (opt_runScan opts) do
-      void $ flip allocateU killThread $ forkIO $ do
+      spawnThread do
         forM_ [(0 :: Int), 20 ..] $ \i -> do
           res <- tryAny $ do
             refreshMissingInfo

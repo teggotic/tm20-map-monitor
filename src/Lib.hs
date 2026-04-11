@@ -21,7 +21,7 @@ import Network.HTTP.Types.Header (hUserAgent)
 import Network.Minio
 import Network.Socket (PortNumber)
 import PingRPC (withPubSocket)
-import Protolude hiding (atomically, bracket, forkIO, threadDelay, to, toList, try, withFile)
+import Protolude hiding (killThread, atomically, bracket, forkIO, threadDelay, to, toList, try, withFile)
 import RIO (BufferMode (LineBuffering), IsString (fromString), LogFunc, MonadUnliftIO, hSetBuffering, logOptionsHandle, newTMVarIO, setLogUseTime, withFile, withLogFunc)
 import qualified RIO.Text as T
 import RIO.Time (getCurrentTime)
@@ -32,6 +32,8 @@ import UnliftIO.Exception (bracket)
 import UnliftIO.STM
 import System.Clock
 import MapMonitor.ServantCache
+import UnliftIO.Resource
+import UnliftIO.Concurrent
 
 data CollectCacheState
   = CollectCacheState
@@ -143,3 +145,7 @@ runLocally m = do
     (liftIO $ openLocalState (MapMonitorState mempty))
     (liftIO . closeAcidState)
     (\acid -> runTemporary acid m)
+
+spawnThread :: (MonadResource m, MonadUnliftIO m) => m () -> m ()
+spawnThread action = do
+  Protolude.void $ flip allocateU killThread $ forkIO $ action

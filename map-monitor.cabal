@@ -38,6 +38,7 @@ library
       MapMonitor.DB
       MapMonitor.Integrations
       MapMonitor.MapCache
+      MapMonitor.MapMonitorTools
       MapMonitor.MissingItemsCheck
       MapMonitor.ReplayValidation
       MapMonitor.ServantCache

@@ -347,25 +347,28 @@ recheckMapsUnhidden = do
 
 processMapFileQueue :: (MonadUnliftIO m, MonadReader env m, HasLogFunc env, HasState env, HasPubRpcSocket env, HasS3Connection env) => TQueue TMMap -> m ()
 processMapFileQueue queue = do
-  atomically (readTQueue queue) >>= \tmmap -> do
-    atSetByPlugin <- checkAtSetByPlugin tmmap
-    logInfo $ "Checking AT set by plugin for map #" <> displayShow (unTMXId $ _tmm_tmxId tmmap) <> ": " <> displayShow atSetByPlugin
-    Protolude.void $ withAcid1 updateMaps $ [(defPatch $ _tmm_tmxId tmmap){_tmmp_atSetByPlugin = Just atSetByPlugin}]
+  atomically (readTQueue queue) >>= checkMapFile
 
-    checkMissingItems tmmap
-      >>= \case
-        Just MissingItems -> do
-          putText $ "Missing items detected for map " <> show (_tmm_tmxId tmmap)
-          updateAcid $ HideMap (_tmm_tmxId tmmap) "Missing items detected by automatic check"
-          rpcSend $
-            PMMissingItemsMapDetectedPing $
-              MissingItemsMapDetectedPing
-                { _mimdp_tmxId = unTMXId $ _tmm_tmxId tmmap
-                , _mimdp_uid = _tmm_uid tmmap
-                , _mimdp_name = _tmm_name tmmap
-                , _mimdp_authorUid = fromMaybe "" $ _tmm_authorUid tmmap
-                }
-        _ -> pass
+checkMapFile :: (MonadUnliftIO m, MonadReader env m, HasLogFunc env,  HasS3Connection env, HasState env, HasPubRpcSocket env) => TMMap -> m ()
+checkMapFile tmmap = do
+  atSetByPlugin <- checkAtSetByPlugin tmmap
+  logInfo $ "Checking AT set by plugin for map #" <> displayShow (unTMXId $ _tmm_tmxId tmmap) <> ": " <> displayShow atSetByPlugin
+  Protolude.void $ withAcid1 updateMaps $ [(defPatch $ _tmm_tmxId tmmap){_tmmp_atSetByPlugin = Just atSetByPlugin}]
+
+  checkMissingItems tmmap
+    >>= \case
+      Just MissingItems -> do
+        putText $ "Missing items detected for map " <> show (_tmm_tmxId tmmap)
+        updateAcid $ HideMap (_tmm_tmxId tmmap) "Missing items detected by automatic check"
+        rpcSend $
+          PMMissingItemsMapDetectedPing $
+            MissingItemsMapDetectedPing
+              { _mimdp_tmxId = unTMXId $ _tmm_tmxId tmmap
+              , _mimdp_uid = _tmm_uid tmmap
+              , _mimdp_name = _tmm_name tmmap
+              , _mimdp_authorUid = fromMaybe "" $ _tmm_authorUid tmmap
+              }
+      _ -> pass
 
 filterMaps :: (MonadIO m, MonadReader env m, HasState env) => (IxEntry -> IxEntry) -> m [TMMap]
 filterMaps f = do
