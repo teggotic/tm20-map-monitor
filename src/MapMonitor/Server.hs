@@ -246,7 +246,7 @@ managementApiServer (Authenticated auser) = managementReportMap :<|> managementD
     return NoContent
 
   managementDeleteReport tmxId = do
-    void $ withAcid1 updateMaps $ [(defPatch $ TMXId tmxId){_tmmp_reportedBy = Just $ Map.fromList [(_auser_uid auser, Nothing)]}]
+    void $ withAcid1 updateMaps $ [TMMapPatch (TMXId tmxId) [TMPReportedBy $ Map.fromList [(_auser_uid auser, Nothing)]]]
     refreshCaches
     return NoContent
 

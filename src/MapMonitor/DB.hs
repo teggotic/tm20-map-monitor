@@ -6,11 +6,14 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 module MapMonitor.DB (
   TMMap (..),
   TMXMapType (..),
   TMMapPatch (..),
+  TMMapPatchAction (..),
+  tmmp_actions,
   TMXId (..),
   TMMapRecord (..),
   MapMonitorState (..),
@@ -229,99 +232,139 @@ data TMMapPatch_v3
 
 $(deriveSafeCopy 3 'base ''TMMapPatch_v3)
 
-data TMMapPatch
-  = TMMapPatch
-  { _tmmp_tmxId :: !TMXId
-  , _tmmp_uid :: !(Maybe Text)
-  , _tmmp_name :: !(Maybe Text)
-  , _tmmp_authorMedal :: !(Maybe Int)
-  , _tmmp_authorUid :: !(Maybe (Maybe Text))
-  , _tmmp_tags :: !(Maybe [Int])
-  , _tmmp_currentWR :: !(Maybe (Maybe TMMapRecord))
-  , _tmmp_uploadedAt :: !(Maybe (Maybe UTCTime))
-  , _tmmp_hiddenReason :: !(Maybe (Maybe Text))
-  , _tmmp_atSetByPlugin :: !(Maybe (Maybe Bool))
-  , _tmmp_nbPlayers :: !(Maybe (Maybe Int))
-  , _tmmp_reportedBy :: !(Maybe (Map Text (Maybe (UTCTime, Text))))
-  , _tmmp_mapType :: !(Maybe (Maybe TMXMapType))
-  , _tmmp_mapVersions :: !(Maybe TMMap)
-  , _tmmp_hiddenOnTmx :: !(Maybe Bool)
-  , _tmmp_beatenPingSent :: !(Maybe Bool)
-  , _tmmp_validationReplay :: !(Maybe (Maybe (Maybe Text, UTCTime)))
+data TMMapPatch_v4
+  = TMMapPatch_v4
+  { v4_tmmp_tmxId :: !TMXId
+  , v4_tmmp_uid :: !(Maybe Text)
+  , v4_tmmp_name :: !(Maybe Text)
+  , v4_tmmp_authorMedal :: !(Maybe Int)
+  , v4_tmmp_authorUid :: !(Maybe (Maybe Text))
+  , v4_tmmp_tags :: !(Maybe [Int])
+  , v4_tmmp_currentWR :: !(Maybe (Maybe TMMapRecord))
+  , v4_tmmp_uploadedAt :: !(Maybe (Maybe UTCTime))
+  , v4_tmmp_hiddenReason :: !(Maybe (Maybe Text))
+  , v4_tmmp_atSetByPlugin :: !(Maybe (Maybe Bool))
+  , v4_tmmp_nbPlayers :: !(Maybe (Maybe Int))
+  , v4_tmmp_reportedBy :: !(Maybe (Map Text (Maybe (UTCTime, Text))))
+  , v4_tmmp_mapType :: !(Maybe (Maybe TMXMapType))
+  , v4_tmmp_mapVersions :: !(Maybe TMMap)
+  , v4_tmmp_hiddenOnTmx :: !(Maybe Bool)
+  , v4_tmmp_beatenPingSent :: !(Maybe Bool)
+  , v4_tmmp_validationReplay :: !(Maybe (Maybe (Maybe Text, UTCTime)))
   }
   deriving (Show)
 
-instance Migrate TMMapPatch where
-  type MigrateFrom TMMapPatch = TMMapPatch_v3
+instance Migrate TMMapPatch_v4 where
+  type MigrateFrom TMMapPatch_v4 = TMMapPatch_v3
   migrate (TMMapPatch_v3{..}) =
-    TMMapPatch
-      { _tmmp_tmxId = v3_tmmp_tmxId
-      , _tmmp_uid = v3_tmmp_uid
-      , _tmmp_name = v3_tmmp_name
-      , _tmmp_authorMedal = v3_tmmp_authorMedal
-      , _tmmp_authorUid = v3_tmmp_authorUid
-      , _tmmp_tags = v3_tmmp_tags
-      , _tmmp_currentWR = v3_tmmp_currentWR
-      , _tmmp_uploadedAt = v3_tmmp_uploadedAt
-      , _tmmp_hiddenReason = v3_tmmp_hiddenReason
-      , _tmmp_atSetByPlugin = v3_tmmp_atSetByPlugin
-      , _tmmp_nbPlayers = v3_tmmp_nbPlayers
-      , _tmmp_reportedBy = v3_tmmp_reportedBy
-      , _tmmp_mapType = v3_tmmp_mapType
-      , _tmmp_mapVersions = v3_tmmp_mapVersions
-      , _tmmp_hiddenOnTmx = v3_tmmp_hiddenOnTmx
-      , _tmmp_beatenPingSent = Nothing
-      , _tmmp_validationReplay = Nothing
+    TMMapPatch_v4
+      { v4_tmmp_tmxId = v3_tmmp_tmxId
+      , v4_tmmp_uid = v3_tmmp_uid
+      , v4_tmmp_name = v3_tmmp_name
+      , v4_tmmp_authorMedal = v3_tmmp_authorMedal
+      , v4_tmmp_authorUid = v3_tmmp_authorUid
+      , v4_tmmp_tags = v3_tmmp_tags
+      , v4_tmmp_currentWR = v3_tmmp_currentWR
+      , v4_tmmp_uploadedAt = v3_tmmp_uploadedAt
+      , v4_tmmp_hiddenReason = v3_tmmp_hiddenReason
+      , v4_tmmp_atSetByPlugin = v3_tmmp_atSetByPlugin
+      , v4_tmmp_nbPlayers = v3_tmmp_nbPlayers
+      , v4_tmmp_reportedBy = v3_tmmp_reportedBy
+      , v4_tmmp_mapType = v3_tmmp_mapType
+      , v4_tmmp_mapVersions = v3_tmmp_mapVersions
+      , v4_tmmp_hiddenOnTmx = v3_tmmp_hiddenOnTmx
+      , v4_tmmp_beatenPingSent = Nothing
+      , v4_tmmp_validationReplay = Nothing
       }
 
-$(deriveSafeCopy 4 'extension ''TMMapPatch)
+$(deriveSafeCopy 4 'extension ''TMMapPatch_v4)
+
+data TMMapPatchAction
+  = TMPUid Text
+  | TMPName Text
+  | TMPAuthorMedal Int
+  | TMPAuthorUid (Maybe Text)
+  | TMPTags [Int]
+  | TMPCurrentWR (Maybe TMMapRecord)
+  | TMPUploadedAt (Maybe UTCTime)
+  | TMPHiddenReason (Maybe Text)
+  | TMPAtSetByPlugin (Maybe Bool)
+  | TMPNbPlayers (Maybe Int)
+  | TMPReportedBy (Map Text (Maybe (UTCTime, Text)))
+  | TMPMapType (Maybe TMXMapType)
+  | TMPMapVersions TMMap
+  | TMPHiddenOnTmx Bool
+  | TMPBeatenPingSent Bool
+  | TMPValidationReplay (Maybe (Maybe Text, UTCTime))
+  deriving (Show, Eq)
+
+$(deriveSafeCopy 0 'base ''TMMapPatchAction)
+
+data TMMapPatch
+  = TMMapPatch
+  { _tmmp_tmxId :: TMXId
+  , _tmmp_actions :: [TMMapPatchAction]
+  }
+  deriving (Show, Eq)
+
+$(makeLenses ''TMMapPatch)
+
+instance Migrate TMMapPatch where
+  type MigrateFrom TMMapPatch = TMMapPatch_v4
+  migrate (TMMapPatch_v4{..}) =
+    TMMapPatch
+      { _tmmp_tmxId = v4_tmmp_tmxId
+      , _tmmp_actions = catMaybes $
+        [ TMPUid <$> v4_tmmp_uid
+        , TMPName <$> v4_tmmp_name
+        , TMPAuthorMedal <$> v4_tmmp_authorMedal
+        , TMPAuthorUid <$> v4_tmmp_authorUid
+        , TMPTags <$> v4_tmmp_tags
+        , TMPCurrentWR <$> v4_tmmp_currentWR
+        , TMPUploadedAt <$> v4_tmmp_uploadedAt
+        , TMPHiddenReason <$> v4_tmmp_hiddenReason
+        , TMPAtSetByPlugin <$> v4_tmmp_atSetByPlugin
+        , TMPNbPlayers <$> v4_tmmp_nbPlayers
+        , TMPReportedBy <$> v4_tmmp_reportedBy
+        , TMPMapType <$> v4_tmmp_mapType
+        , TMPMapVersions <$> v4_tmmp_mapVersions
+        , TMPHiddenOnTmx <$> v4_tmmp_hiddenOnTmx
+        , TMPBeatenPingSent <$> v4_tmmp_beatenPingSent
+        , TMPValidationReplay <$> v4_tmmp_validationReplay
+        ]
+      }
+
+$(deriveSafeCopy 5 'extension ''TMMapPatch)
 
 defPatch :: TMXId -> TMMapPatch
-defPatch idx = TMMapPatch idx Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing Nothing
+defPatch idx = TMMapPatch idx []
 
 patchIsEmpty :: TMMapPatch -> Bool
-patchIsEmpty patch =
-  and
-    [ isNothing $ _tmmp_uid patch
-    , isNothing $ _tmmp_name patch
-    , isNothing $ _tmmp_authorMedal patch
-    , isNothing $ _tmmp_authorUid patch
-    , isNothing $ _tmmp_tags patch
-    , isNothing $ _tmmp_currentWR patch
-    , isNothing $ _tmmp_uploadedAt patch
-    , isNothing $ _tmmp_hiddenReason patch
-    , isNothing $ _tmmp_atSetByPlugin patch
-    , isNothing $ _tmmp_nbPlayers patch
-    , maybe False Protolude.null $ _tmmp_reportedBy patch
-    , isNothing $ _tmmp_mapVersions patch
-    , isNothing $ _tmmp_hiddenOnTmx patch
-    , isNothing $ _tmmp_beatenPingSent patch
-    , isNothing $ _tmmp_validationReplay patch
-    ]
+patchIsEmpty = Protolude.null . _tmmp_actions
+
+applyMapChanges :: Ord k => Map k a -> Map k (Maybe a) -> Map k a
+applyMapChanges mp updates = foldl' (\acc (k, val) -> Map.alter (const val) k acc) mp (Map.assocs updates)
 
 applyPatch :: TMMapPatch -> TMMap -> TMMap
 applyPatch patch tmMap =
-  TMMap
-    { _tmm_tmxId = _tmmp_tmxId patch
-    , _tmm_uid = fromMaybe (_tmm_uid tmMap) (_tmmp_uid patch)
-    , _tmm_name = fromMaybe (_tmm_name tmMap) (_tmmp_name patch)
-    , _tmm_authorMedal = fromMaybe (_tmm_authorMedal tmMap) (_tmmp_authorMedal patch)
-    , _tmm_authorUid = fromMaybe (_tmm_authorUid tmMap) (_tmmp_authorUid patch)
-    , _tmm_tags = fromMaybe (_tmm_tags tmMap) (_tmmp_tags patch)
-    , _tmm_currentWR = fromMaybe (_tmm_currentWR tmMap) (_tmmp_currentWR patch)
-    , _tmm_uploadedAt = fromMaybe (_tmm_uploadedAt tmMap) (_tmmp_uploadedAt patch)
-    , _tmm_hiddenReason = fromMaybe (_tmm_hiddenReason tmMap) (_tmmp_hiddenReason patch)
-    , _tmm_atSetByPlugin = fromMaybe (_tmm_atSetByPlugin tmMap) (_tmmp_atSetByPlugin patch)
-    , _tmm_nbPlayers = fromMaybe (_tmm_nbPlayers tmMap) (_tmmp_nbPlayers patch)
-    , _tmm_reportedBy = case _tmmp_reportedBy patch of
-        Nothing -> _tmm_reportedBy tmMap
-        Just updates -> foldl' (\acc (k, val) -> Map.alter (const val) k acc) (_tmm_reportedBy tmMap) (Map.assocs updates)
-    , _tmm_mapType = fromMaybe (_tmm_mapType tmMap) (_tmmp_mapType patch)
-    , _tmm_mapVersions = fromMaybe (_tmm_mapVersions tmMap) ((: _tmm_mapVersions tmMap) <$> _tmmp_mapVersions patch)
-    , _tmm_hiddenOnTmx = fromMaybe (_tmm_hiddenOnTmx tmMap) (_tmmp_hiddenOnTmx patch)
-    , _tmm_beatenPingSent = fromMaybe (_tmm_beatenPingSent tmMap) (_tmmp_beatenPingSent patch)
-    , _tmm_validationReplay = fromMaybe (_tmm_validationReplay tmMap) (_tmmp_validationReplay patch)
-    }
+  foldl' go tmMap (_tmmp_actions patch)
+ where
+  go acc (TMPUid uid) = acc{_tmm_uid = uid}
+  go acc (TMPName name) = acc{_tmm_name = name}
+  go acc (TMPAuthorMedal medal) = acc{_tmm_authorMedal = medal}
+  go acc (TMPAuthorUid authorUid) = acc{_tmm_authorUid = authorUid}
+  go acc (TMPTags tags) = acc{_tmm_tags = tags}
+  go acc (TMPCurrentWR wr) = acc{_tmm_currentWR = wr}
+  go acc (TMPUploadedAt uploadedAt) = acc{_tmm_uploadedAt = uploadedAt}
+  go acc (TMPHiddenReason hiddenReason) = acc{_tmm_hiddenReason = hiddenReason}
+  go acc (TMPAtSetByPlugin atSetByPlugin) = acc{_tmm_atSetByPlugin = atSetByPlugin}
+  go acc (TMPNbPlayers nbPlayers) = acc{_tmm_nbPlayers = nbPlayers}
+  go acc (TMPReportedBy reportedBy) = acc{_tmm_reportedBy = applyMapChanges (_tmm_reportedBy tmMap) reportedBy}
+  go acc (TMPMapType mapType) = acc{_tmm_mapType = mapType}
+  go acc (TMPMapVersions mapVersion) = acc{_tmm_mapVersions = mapVersion : _tmm_mapVersions tmMap}
+  go acc (TMPHiddenOnTmx hiddenOnTmx) = acc{_tmm_hiddenOnTmx = hiddenOnTmx}
+  go acc (TMPBeatenPingSent beatenPingSent) = acc{_tmm_beatenPingSent = beatenPingSent}
+  go acc (TMPValidationReplay validationReplay) = acc{_tmm_validationReplay = validationReplay}
 
 data MapMonitorState
   = MapMonitorState
@@ -436,11 +479,11 @@ getMapMonitorState = ask
 
 hideMap :: TMXId -> Text -> Update MapMonitorState ()
 hideMap tmxId reason = do
-  updateMaps' [(defPatch tmxId){_tmmp_hiddenReason = Just $ Just reason}]
+  updateMaps' [TMMapPatch tmxId [TMPHiddenReason (Just reason)]]
 
 setAtSetByPlugin :: TMXId -> Maybe Bool -> Update MapMonitorState ()
 setAtSetByPlugin tmxId atSetByPlugin = do
-  updateMaps' [(defPatch tmxId){_tmmp_atSetByPlugin = Just $ atSetByPlugin}]
+  updateMaps' [TMMapPatch tmxId [TMPAtSetByPlugin atSetByPlugin]]
 
 $(makeAcidic ''MapMonitorState ['updateMaps', 'addNewMaps, 'addNewMaps', 'getMaps, 'getMapMonitorState, 'hideMap, 'setAtSetByPlugin, 'getMapsByIds, 'removeMap, 'getMapById, 'isKnownId, 'getAllKnownIds, 'tryUpdateMapVersion])
 
@@ -458,4 +501,4 @@ reportMap acid tmxId (userId, now, message) = do
   update' acid $
     UpdateMaps' $
       pure $
-        (defPatch tmxId){_tmmp_reportedBy = Just $ fromList [(userId, Just (now, message))]}
+        TMMapPatch tmxId [TMPReportedBy $ fromList [(userId, Just (now, message))]]

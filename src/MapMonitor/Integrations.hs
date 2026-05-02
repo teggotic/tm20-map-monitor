@@ -147,7 +147,7 @@ mapHasNewInfoFilterMC =
           else
             if _tmm_hiddenOnTmx dbmap
               then do
-                void $ withAcid1 updateMaps [(defPatch (_tmm_tmxId mp)){_tmmp_hiddenOnTmx = Just False}]
+                void $ withAcid1 updateMaps [TMMapPatch (_tmm_tmxId mp) [TMPHiddenOnTmx $ False]]
                 return $ Just dbmap{_tmm_hiddenOnTmx = False}
               else return Nothing
 
@@ -161,7 +161,7 @@ getMapRecord tmmap = do
         return (mapPatch, tmmap)
       Right (GetMapLeaderboardResponse{_gmlr_tops = [GetMapLeaderboardTop{_gmlt_top = [topRecord]}]}) -> do
         logInfo $ "Got record for map " <> displayShow (unTMXId $ _tmm_tmxId tmmap, _tmm_uid tmmap)
-        return $ (mapPatch{_tmmp_currentWR = Just $ Just (TMMapRecord (_gmlte_accountId topRecord) (_gmlte_score topRecord) (_gmlte_timestamp topRecord))}, tmmap)
+        return $ ((mapPatch & tmmp_actions %~ (TMPCurrentWR (Just $ TMMapRecord (_gmlte_accountId topRecord) (_gmlte_score topRecord) (_gmlte_timestamp topRecord)) :)), tmmap)
       err@_ -> do
         logInfo $ "No records found for map " <> displayShow (_tmm_uid tmmap) <> " with error: " <> displayShow err
         return (mapPatch, tmmap)
@@ -202,10 +202,10 @@ nadeoMapInfoC = do
         [ ( case mpM of
               Nothing -> patch
               Just mp ->
-                patch
-                  { _tmmp_authorUid = Just $ Just (_gmmrm_author mp)
-                  , _tmmp_uploadedAt = Just $ Just (unUTCTimestamp $ _gmmrm_uploadTimestamp mp)
-                  }
+                patch & tmmp_actions %~
+                    ( (TMPAuthorUid (Just $ _gmmrm_author mp):)
+                    . (TMPUploadedAt (Just $ unUTCTimestamp $ _gmmrm_uploadTimestamp mp):)
+                    )
           , tmmap
           )
         | tmmap <- tmmaps
@@ -308,7 +308,7 @@ refreshNbPlayers = do
         logError $ displayShow (_tmm_tmxId tmmap) <> ": error: " <> displayShow err
       Right res -> do
         logInfo $ displayShow (_tmm_tmxId tmmap) <> ": got nb players: " <> displayShow (_xmpr_nb_players res)
-        void $ withAcid1 updateMaps [(defPatch (_tmm_tmxId tmmap)){_tmmp_nbPlayers = Just $ Just (_xmpr_nb_players res)}]
+        void $ withAcid1 updateMaps [TMMapPatch (_tmm_tmxId tmmap) [TMPNbPlayers $ Just (_xmpr_nb_players res)]]
 
 -- rescanMaps :: (MonadReader env m, HasState env, MonadUnliftIO m, HasAppSettings env, HasLogFunc env) => m ()
 -- rescanMaps = do
@@ -330,7 +330,7 @@ recheckTmxInfo = do
   let hiddenMaps = (fromList $ fmap _tmm_tmxId maps) Set.\\ mapsOnTmx
   logInfo $ "Updated " <> displayShow (length updatedMaps) <> " maps"
   logInfo $ "Hiding " <> displayShow (length hiddenMaps) <> " maps"
-  void $ withAcid1 updateMaps $ fmap (\tmxId -> (defPatch tmxId){_tmmp_hiddenOnTmx = Just True}) $ Set.toList hiddenMaps
+  void $ withAcid1 updateMaps $ fmap (\tmxId -> TMMapPatch tmxId [TMPHiddenOnTmx True]) $ Set.toList hiddenMaps
 
 recheckMapsUnhidden :: (MonadReader env m, HasState env, MonadUnliftIO m, HasLogFunc env, HasTMXClient env) => m ()
 recheckMapsUnhidden = do
@@ -353,7 +353,7 @@ checkMapFile :: (MonadUnliftIO m, MonadReader env m, HasLogFunc env,  HasS3Conne
 checkMapFile tmmap = do
   atSetByPlugin <- checkAtSetByPlugin tmmap
   logInfo $ "Checking AT set by plugin for map #" <> displayShow (unTMXId $ _tmm_tmxId tmmap) <> ": " <> displayShow atSetByPlugin
-  Protolude.void $ withAcid1 updateMaps $ [(defPatch $ _tmm_tmxId tmmap){_tmmp_atSetByPlugin = Just atSetByPlugin}]
+  Protolude.void $ withAcid1 updateMaps $ [TMMapPatch (_tmm_tmxId tmmap) [TMPAtSetByPlugin atSetByPlugin]]
 
   checkMissingItems tmmap
     >>= \case

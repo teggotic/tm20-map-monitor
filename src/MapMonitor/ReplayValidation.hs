@@ -88,7 +88,7 @@ validateReplay req = do
                                         void $
                                           withAcid1
                                             updateMaps
-                                            [ (defPatch $ _tmm_tmxId tmmap){_tmmp_validationReplay = Just $ Just (Nothing, now)}
+                                            [ TMMapPatch (_tmm_tmxId tmmap) [TMPValidationReplay $ Just (Nothing, now)]
                                             ]
                                         return $ Right Nothing
                                       True -> do
@@ -102,7 +102,7 @@ validateReplay req = do
                                             void $
                                               withAcid1
                                                 updateMaps
-                                                [ (defPatch $ _tmm_tmxId tmmap){_tmmp_validationReplay = Just $ Just (Just (show uuid), now)}
+                                                [ TMMapPatch (_tmm_tmxId tmmap) [TMPValidationReplay $ Just (Just (show uuid), now)]
                                                 ]
                                             return $ Right $ Just $ show uuid
                                   else return $ Left $ "Replay is valid, but replay length does not match AT " <> show (_sr_Time sr) <> ", expected " <> show (_tmm_authorMedal tmmap)
