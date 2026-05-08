@@ -80,6 +80,7 @@ dependencies:
 - http-media
 - cache
 - bytestring
+- text
 
 default-extensions:
 - LambdaCase
@@ -173,6 +174,34 @@ executables:
             - -with-rtsopts=-N
     dependencies:
     - map-monitor
+
+  map-monitor-admin-ui-exe:
+    main:                Main.hs
+    source-dirs:         adminui
+    when:
+      - condition: flag(static)
+        then:
+          ld-options:
+          - -static
+          - -pthread
+          - -lstdc++
+          - -lsodium
+          ghc-options:
+            - -threaded
+            - -rtsopts
+            - -with-rtsopts=-N
+            - -optc-Os
+            - -optl=-pthread
+            - -optl=-static
+            - -fPIC
+        else:
+          ghc-options:
+            - -threaded
+            - -rtsopts
+            - -with-rtsopts=-N
+    dependencies:
+    - map-monitor
+    - threepenny-gui
 
   map-monitor-ping-bot-exe:
     main:                Main.hs

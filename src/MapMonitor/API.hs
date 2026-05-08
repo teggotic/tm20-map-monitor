@@ -43,7 +43,8 @@ type DownloadMapAPI =
 
 type TMXApi =
   "tmx"
-    :> ( "unbeaten_ats" :> Cached 1200 UnbeatenAtsResponse :> Get '[JSON] UnbeatenAtsResponse
+    :> ( "unbeaten_ats" :> Cached 1200 (UnbeatenAtsResponse UnbeatenAtTrack) :> Get '[JSON] (UnbeatenAtsResponse UnbeatenAtTrack)
+    :<|> "unbeaten_ats" :> "v2" :> Cached 1200 (UnbeatenAtsResponse UnbeatenAtTrack) :> Get '[JSON] (UnbeatenAtsResponse UnbeatenAtTrack)
            :<|> "unbeaten_ats" :> "leaderboard" :> Get '[JSON] UnbeatenAtsLeaderboardResponse
            :<|> "recently_beaten_ats" :> Cached 1200 RecentlyBeatenAtsResponse :> Get '[JSON] RecentlyBeatenAtsResponse
            :<|> "unbeaten_count" :> Get '[PlainText] Text

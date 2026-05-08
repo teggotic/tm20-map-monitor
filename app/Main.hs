@@ -42,10 +42,13 @@ optsP = Options <$> flag True False (long "no-scan" <> help "Disable map monitor
 
 runMain :: (MonadUnliftIO m, MonadFail m) => Options -> m ()
 runMain opts = runResourceT $ do
-  (_, acid) <- allocate (liftIO $ openLocalState (MapMonitorState mempty)) (liftIO . closeAcidState)
+  putText "Starting up"
+  (_, acid) <- allocate (liftIO $ openLocalState (MapMonitorState mempty mempty)) (liftIO . closeAcidState)
+  putText "Opened acid state"
   checkMapFileQueue <- newTQueueIO
 
   runInApp acid checkMapFileQueue $ do
+    logInfo "Loaded environment"
     spawnThread $ forever do
       tryAny (processMapFileQueue checkMapFileQueue)
         >>= \case
@@ -95,6 +98,7 @@ runMain opts = runResourceT $ do
 
     _ <- P.register P.ghcMetrics
 
+    logInfo "Starting API"
     liftIO $
       runSettings settings $
         simpleCors $

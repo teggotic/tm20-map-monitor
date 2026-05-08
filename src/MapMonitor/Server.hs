@@ -39,6 +39,7 @@ import Network.Minio
 import Network.Wai as Wai
 import PingRPC
 import Protolude hiding (atomically, finally, threadDelay, wait, withAsync, (<.>))
+import qualified Data.Set as Set
 import RIO (HasLogFunc (..), LogFunc, displayShow, finally, logError, logInfo, toStrictBytes)
 import RIO.FilePath (takeFileName)
 import qualified RIO.Text as T
@@ -207,7 +208,7 @@ downloadMapsServer st = downloadMap
 -- return tmmaps
 
 tmxApiServer :: ServerT TMXApi AppM
-tmxApiServer = unbeaten :<|> unbeatenLeaderboard :<|> beaten :<|> unbeatenCount :<|> doPurgeCache
+tmxApiServer = unbeaten :<|> unbeatenV2 :<|> unbeatenLeaderboard :<|> beaten :<|> unbeatenCount :<|> doPurgeCache
  where
   beaten = do
     collectBeatenAtsResponse
@@ -223,6 +224,9 @@ tmxApiServer = unbeaten :<|> unbeatenLeaderboard :<|> beaten :<|> unbeatenCount 
 
   unbeaten = do
     collectUnbeatenAtsResponse
+
+  unbeatenV2 = do
+    collectUnbeatenAtsResponseV2
 
   unbeatenCount = do
     maps <- filter (isNothing . _tmm_hiddenReason) <$> filterMaps ((@= (HiddenOnTmx False)) . (@= HasNadeoInfo True) . (@= (TrackType $ Just MT_Race)) . (@= Unbeaten))
@@ -396,8 +400,54 @@ collectBeatenAtsResponse = do
     , fromMaybe 123456 (_tmm_nbPlayers tmmap)
     )
 
-collectUnbeatenAtsResponse :: (MonadIO m, MonadReader env m, HasState env, HasAppSettings env) => m UnbeatenAtsResponse
+collectUnbeatenAtsResponse :: (MonadIO m, MonadReader env m, HasState env, HasAppSettings env) => m (UnbeatenAtsResponse UnbeatenAtTrack)
 collectUnbeatenAtsResponse = do
+  allMaps <- queryAcid GetMaps
+  host <- view $ appSettingsL . settings_s3_creds . s3_creds_host
+  let
+    unbeatenMaps =
+      flip fmap allMaps $ \tmmap ->
+        let
+          hiddenInfo' = ( Text.intercalate "; " $ catMaybes
+                (map (\(k, v) -> bool Nothing (Just v) (Set.member k $ _tmm_info tmmap))
+                     [ (TMBrokenPhysics, "broken physics")
+                     , (TMCheatedAt, "cheated at")
+                     ])
+                )
+          hiddenInfo = if T.null hiddenInfo' then Nothing else Just hiddenInfo'
+         in UnbeatenAtTrack
+          { _uat_trackId = _tmm_tmxId tmmap
+          , _uat_trackUid = _tmm_uid tmmap
+          , _uat_trackName = _tmm_name tmmap
+          , _uat_authorLogin = fromMaybe "N/A" (_tmm_authorUid tmmap)
+          , _uat_tags = Text.intercalate "," (show <$> _tmm_tags tmmap)
+          , _uat_mapType = "TM_Race"
+          , _uat_authorTime = _tmm_authorMedal tmmap
+          , _uat_wr = fromMaybe (-1) (_tmmr_time <$> _tmm_currentWR tmmap)
+          , _uat_lastChecked = 0
+          , _uat_nbPlayers = fromMaybe 123456 (_tmm_nbPlayers tmmap)
+          , _uat_isHidden = isJust (_tmm_hiddenReason tmmap) || isJust hiddenInfo
+          , _uat_reason = fromMaybe "" (_tmm_hiddenReason tmmap <|> hiddenInfo)
+          , _uat_atSetByPlugin = fromMaybe False (_tmm_atSetByPlugin tmmap)
+          , _uat_reported = (\(k, (_, r)) -> (k, r)) <$> Map.assocs (_tmm_reportedBy tmmap)
+          , _uat_uploadedTimestamp = maybe 0 (nominalDiffTimeToSeconds . utcTimeToPOSIXSeconds) (_tmm_uploadedAt tmmap)
+          , _uat_validation =
+              case _tmm_validationReplay tmmap of
+                Nothing -> (False, "")
+                Just (url, _) -> (True, maybe "" (\x -> "https://" <> "map-monitor-replays" <> "." <> host <> "/ghosts/" <> x <> ".Ghost.Gbx") url)
+          , _uat_fileSize = fromMaybe (-1) $ _tmm_fileSize tmmap
+          , _uat_info = Set.toList $ _tmm_info tmmap
+          }
+
+  return $
+    UnbeatenAtsResponse
+      { _uar_keys = ["TrackID", "TrackUID", "Track_Name", "AuthorLogin", "Tags", "MapType", "AuthorTime", "WR", "LastChecked", "NbPlayers", "IsHidden", "Reason", "AtSetByPlugin", "Reported", "UploadedTimestamp", "Validation", "FileSize", "Hints"]
+      , _uar_tracks = unbeatenMaps
+      , _uar_nbTracks = length unbeatenMaps
+      }
+
+collectUnbeatenAtsResponseV2 :: (MonadIO m, MonadReader env m, HasState env, HasAppSettings env) => m (UnbeatenAtsResponse UnbeatenAtTrack)
+collectUnbeatenAtsResponseV2 = do
   allMaps <- queryAcid GetMaps
   host <- view $ appSettingsL . settings_s3_creds . s3_creds_host
   let
@@ -423,11 +473,13 @@ collectUnbeatenAtsResponse = do
               case _tmm_validationReplay tmmap of
                 Nothing -> (False, "")
                 Just (url, _) -> (True, maybe "" (\x -> "https://" <> "map-monitor-replays" <> "." <> host <> "/ghosts/" <> x <> ".Ghost.Gbx") url)
+          , _uat_fileSize = fromMaybe (-1) $ _tmm_fileSize tmmap
+          , _uat_info = Set.toList $ _tmm_info tmmap
           }
 
   return $
     UnbeatenAtsResponse
-      { _uar_keys = ["TrackID", "TrackUID", "Track_Name", "AuthorLogin", "Tags", "MapType", "AuthorTime", "WR", "LastChecked", "NbPlayers", "IsHidden", "Reason", "AtSetByPlugin", "Reported", "UploadedTimestamp", "Validation"]
+      { _uar_keys = ["TrackID", "TrackUID", "Track_Name", "AuthorLogin", "Tags", "MapType", "AuthorTime", "WR", "LastChecked", "NbPlayers", "IsHidden", "Reason", "AtSetByPlugin", "Reported", "UploadedTimestamp", "Validation", "FileSize", "Hints"]
       , _uar_tracks = unbeatenMaps
       , _uar_nbTracks = length unbeatenMaps
       }

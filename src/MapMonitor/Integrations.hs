@@ -65,6 +65,10 @@ tmxMapToTMMap tmx = do
       , _tmm_hiddenOnTmx = False
       , _tmm_beatenPingSent = False
       , _tmm_validationReplay = Nothing
+      , _tmm_hasClones = Nothing
+      , _tmm_info = mempty
+      , _tmm_omittedFromPlugin = False
+      , _tmm_fileSize = Nothing
       }
 
 tmxMapsSource :: (MonadIO m, MonadReader env m, HasTMXClient env, HasLogFunc env) => Int -> Maybe Int -> ConduitT () TMMap m ()
@@ -355,6 +359,8 @@ checkMapFile tmmap = do
   logInfo $ "Checking AT set by plugin for map #" <> displayShow (unTMXId $ _tmm_tmxId tmmap) <> ": " <> displayShow atSetByPlugin
   Protolude.void $ withAcid1 updateMaps $ [TMMapPatch (_tmm_tmxId tmmap) [TMPAtSetByPlugin atSetByPlugin]]
 
+  updateMapSize tmmap
+
   checkMissingItems tmmap
     >>= \case
       Just MissingItems -> do
@@ -374,3 +380,9 @@ filterMaps :: (MonadIO m, MonadReader env m, HasState env) => (IxEntry -> IxEntr
 filterMaps f = do
   st <- queryAcid GetMapMonitorState
   return $ IxSet.toList $ f $ _mms_maps st
+
+updateMapSize :: (MonadUnliftIO m, MonadReader env m, HasS3Connection env,  HasLogFunc env, HasState env) => TMMap -> m ()
+updateMapSize tmmap =
+  mapFileSize tmmap >>= \case
+    Left err -> logError $ displayShow err
+    Right sz -> Protolude.void $ withAcid1 updateMaps  [ TMMapPatch (_tmm_tmxId tmmap) [TMPFileSize sz]]

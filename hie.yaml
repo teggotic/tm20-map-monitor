@@ -3,6 +3,9 @@ cradle:
     - path: "./src"
       component: "map-monitor:lib"
 
+    - path: "./adminui/Main.hs"
+      component: "map-monitor:exe:map-monitor-admin-ui-exe"
+
     - path: "./app/Main.hs"
       component: "map-monitor:exe:map-monitor-exe"
 

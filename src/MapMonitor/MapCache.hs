@@ -36,7 +36,7 @@ withMapFile tmmap@(TMMap{_tmm_tmxId = TMXId tmxId, _tmm_uid = uid}) action = do
 
 downloadMapFile :: (MonadUnliftIO m, MonadReader env m, HasS3Connection env, HasLogFunc env) => TMMap -> FilePath -> m (Either Text ())
 downloadMapFile tmmap@(TMMap{_tmm_uid = uid}) outFile = do
-  let mapPath = pack $ "maps/uid" </> unpack uid <.> "Map.Gbx"
+  let mapPath = s3MapPath uid
   buck <- view s3BucketL
   conn <- view s3ConnL
   downloadTmxMapToS3 tmmap >>= \case
@@ -56,7 +56,7 @@ downloadTmxMapToS3 (TMMap{_tmm_tmxId = TMXId tmxId, _tmm_uid = uid}) = do
   resE <- tryAny do
     conn <- view s3ConnL
     buck <- view s3BucketL
-    let mapPath = (pack $ "maps/uid" </> unpack uid RIO.FilePath.<.> ".Map.Gbx")
+    let mapPath = s3MapPath uid
     statE <- liftIO $ runMinioWith conn do
       statObject buck mapPath defaultGetObjectOptions
     case statE of
@@ -81,3 +81,22 @@ downloadTmxMapToS3 (TMMap{_tmm_tmxId = TMXId tmxId, _tmm_uid = uid}) = do
       return $ Left $ show err
     Right (Right x) -> do
       return $ Right x
+
+s3MapPath :: Text -> Text
+s3MapPath uid = (pack $ "maps/uid" </> unpack uid <.> ".Map.Gbx")
+
+mapFileSize :: (MonadReader env m, HasS3Connection env, MonadUnliftIO m, HasLogFunc env) => TMMap -> m (Either Text Int)
+mapFileSize tmmap = do
+  downloadTmxMapToS3 tmmap >>= \case
+    Left err -> return $ Left err
+    Right _ -> do
+      resE <- tryAny do
+        conn <- view s3ConnL
+        buck <- view s3BucketL
+        let mapPath = s3MapPath $ _tmm_uid tmmap
+        liftIO $ runMinioWith conn do
+          statObject buck mapPath defaultGetObjectOptions
+      case resE of
+        Left e -> return $ Left $ pack $ displayException e
+        Right (Left e) -> return $ Left $ pack $ displayException e
+        Right (Right res) -> return $ Right $ fromIntegral $ oiSize res

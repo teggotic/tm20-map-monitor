@@ -45,6 +45,8 @@ data UnbeatenAtTrack
   , _uat_reported :: ![(Text, Text)]
   , _uat_uploadedTimestamp :: !Pico
   , _uat_validation :: !(Bool, Text)
+  , _uat_fileSize :: !Int
+  , _uat_info :: [TMInfo]
   }
   deriving (Show, Generic)
 
@@ -68,12 +70,15 @@ instance ToJSON UnbeatenAtTrack where
         , toJSON _uat_reported
         , toJSON _uat_uploadedTimestamp
         , toJSON _uat_validation
+        , toJSON _uat_fileSize
+        , toJSON _uat_info
         ]
 
-data UnbeatenAtsResponse
+
+data UnbeatenAtsResponse t
   = UnbeatenAtsResponse
   { _uar_keys :: ![Text]
-  , _uar_tracks :: ![UnbeatenAtTrack]
+  , _uar_tracks :: ![t]
   , _uar_nbTracks :: !Int
   }
   deriving (Show)
