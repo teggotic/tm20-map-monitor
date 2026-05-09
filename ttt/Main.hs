@@ -63,6 +63,12 @@ downloadTMXMaps startId = do
 main :: IO ()
 main = do
   getArgs >>= \case
+    ["refresh-file-sizes"] -> do
+      runRemotely 9099 $ do
+        mps <- queryAcid GetMaps
+        pooledForConcurrentlyN_ 20 (zip [0..] mps) \(i, mp) -> do
+          updateMapSize mp
+          logInfo $ ("updated " <> displayShow i <> "/" <> displayShow (length mps))
     ["recheck-set-with-plugin"] -> do
       runRemotely 9099 $ do
         maps <- filterMaps ((@= Unbeaten) . (@= HiddenOnTmx False))

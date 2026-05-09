@@ -34,6 +34,7 @@ import System.Clock
 import MapMonitor.ServantCache
 import UnliftIO.Resource
 import UnliftIO.Concurrent
+import Control.Lens (view)
 
 data CollectCacheState
   = CollectCacheState
@@ -149,3 +150,10 @@ runLocally m = do
 spawnThread :: (MonadResource m, MonadUnliftIO m) => m () -> m ()
 spawnThread action = do
   Protolude.void $ flip allocateU killThread $ forkIO $ action
+
+archiveAcid :: (MonadUnliftIO m, MonadReader env m, HasState env) => m ()
+archiveAcid = do
+  acid <- view stateL
+  liftIO $ do
+    createCheckpoint acid
+    createArchive acid

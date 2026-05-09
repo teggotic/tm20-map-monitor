@@ -101,4 +101,11 @@ type HtmxAPI =
            :<|> ("map-by-tmxid" :> QueryParam' '[Required] "tmxid" Text :> Get '[HTML] Text)
        )
 
-type MapMonitorAPI = TMXApi :<|> DownloadMapAPI :<|> (Auth '[JWT] AUser :> ManagementAPI) :<|> AuthAPI :<|> ("static" :> Raw) :<|> HtmxAPI :<|> ("db-dump" :> Get '[JSON] MapMonitorState)
+data ExportDBResponse =
+  ExportDBResponse
+  { _edr_maps :: IxEntry
+  }
+
+$(deriveToJSON defaultOptions{fieldLabelModifier = drop (Text.length "_edr_")} ''ExportDBResponse)
+
+type MapMonitorAPI = TMXApi :<|> DownloadMapAPI :<|> (Auth '[JWT] AUser :> ManagementAPI) :<|> AuthAPI :<|> ("static" :> Raw) :<|> HtmxAPI :<|> ("db-dump" :> Get '[JSON] ExportDBResponse)

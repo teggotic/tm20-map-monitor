@@ -338,7 +338,9 @@ server1 st staticPath = tmxApiServer :<|> downloadMapsServer st :<|> managementA
 
   dbDump = do
     db <- queryAcid GetMapMonitorState
-    return db
+    return $ ExportDBResponse
+      { _edr_maps = _mms_maps db @= HiddenOnTmx False
+      }
 
 fallbackApp :: Application
 fallbackApp _ respond = do

@@ -466,9 +466,6 @@ data MapMonitorState
   }
   deriving (Show)
 
-instance ToJSON MapMonitorState where
-  toJSON mms = toJSON $ Map.fromList [("maps"::Text, _mms_maps mms)]
-
 instance Migrate MapMonitorState where
   type MigrateFrom MapMonitorState = MapMonitorState_v3
   migrate (MapMonitorState_v3 {..}) =
