@@ -23,9 +23,6 @@ import GHC.Exts
 import GHC.Generics
 import MapMonitor.DB
 import Protolude
-import Protolude.Error (error)
-import RIO.List
-import RIO.Prelude.Types
 
 data UnbeatenAtTrack
   = UnbeatenAtTrack

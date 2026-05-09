@@ -174,7 +174,6 @@ $(deriveSafeCopy 9 'extension ''TMMap_v9)
 data TMInfo
   = TMCheatedAt
   | TMBrokenPhysics
-  | TMLowInputStrat
   deriving (Show, Eq, Ord)
 
 $(deriveJSON defaultOptions{constructorTagModifier = drop (Text.length "TM")} ''TMInfo)

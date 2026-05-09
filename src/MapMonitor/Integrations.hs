@@ -1,4 +1,5 @@
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
 module MapMonitor.Integrations
 where
@@ -21,15 +22,10 @@ import MapMonitor.Common
 import MapMonitor.DB
 import MapMonitor.MapCache
 import MapMonitor.MissingItemsCheck
-import Network.HTTP.Req
-import Network.HTTP.Req.Conduit
-import Network.Minio
 import PingRPC
 import Protolude hiding (atomically, forkIO, threadDelay, yield, (<.>))
-import RIO (HasLogFunc, displayShow, logError, logInfo, logSticky, logStickyDone)
-import RIO.FilePath
+import RIO (HasLogFunc, displayShow, logError, logInfo)
 import qualified RIO.Map as Map
-import RIO.Text (pack, unpack)
 import RIO.Time
 import UnliftIO
 import UnliftIO.Concurrent hiding (yield)

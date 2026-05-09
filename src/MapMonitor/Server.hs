@@ -428,8 +428,8 @@ collectUnbeatenAtsResponse = do
           , _uat_wr = fromMaybe (-1) (_tmmr_time <$> _tmm_currentWR tmmap)
           , _uat_lastChecked = 0
           , _uat_nbPlayers = fromMaybe 123456 (_tmm_nbPlayers tmmap)
-          , _uat_isHidden = isJust (_tmm_hiddenReason tmmap) || isJust hiddenInfo
-          , _uat_reason = fromMaybe "" (_tmm_hiddenReason tmmap <|> hiddenInfo)
+          , _uat_isHidden = isJust (_tmm_hiddenReason tmmap) || isJust hiddenInfo || Just True == _tmm_hasClones tmmap
+          , _uat_reason = fromMaybe "" (_tmm_hiddenReason tmmap <|> hiddenInfo <|> bool Nothing (Just "clone car map") (_tmm_hasClones tmmap == Just True))
           , _uat_atSetByPlugin = fromMaybe False (_tmm_atSetByPlugin tmmap)
           , _uat_reported = (\(k, (_, r)) -> (k, r)) <$> Map.assocs (_tmm_reportedBy tmmap)
           , _uat_uploadedTimestamp = maybe 0 (nominalDiffTimeToSeconds . utcTimeToPOSIXSeconds) (_tmm_uploadedAt tmmap)
