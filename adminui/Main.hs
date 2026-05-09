@@ -25,6 +25,7 @@ import Network.Wai.Middleware.Cors (simpleCors, CorsResourcePolicy (..), simpleC
 import MapMonitor.ServantCache (ResponseCache (ResponseCache), Cached)
 import Data.Cache (newCache, purge)
 import System.Clock (TimeSpec(TimeSpec))
+import Protolude (getArgs)
 
 type AdminAPI =
   "admin" :> "api" :> "maps" :> Cached 1200 MapsResponse :> Get '[JSON] MapsResponse
@@ -80,5 +81,6 @@ runAdminApi port acid = do
 
 main :: IO ()
 main = do
-  acid <- openRemoteState @MapMonitorState skipAuthenticationPerform "localhost" 8082
+  port <- (read . Prelude.head) <$> getArgs
+  acid <- openRemoteState @MapMonitorState skipAuthenticationPerform "localhost" port
   runAdminApi 8083 acid
