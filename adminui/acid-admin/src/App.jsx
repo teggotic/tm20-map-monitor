@@ -155,6 +155,7 @@ export default function App() {
     uploadedTo: "",
     fileMin: "",
     fileMax: "",
+    hasNotes: "all",
   });
   const f = useDeferredValue(filters);
 
@@ -236,6 +237,7 @@ export default function App() {
       if (!tri(m.hasClones, f.clones)) return false;
       if (!tri(m.validationReplay != null, f.validation)) return false;
       if (!tri(m.hiddenReason != null && String(m.hiddenReason).trim() !== "", f.hasHiddenReason)) return false;
+      if (!tri(Object.keys(m.reportedBy).length > 0, f.hasNotes)) return false;
 
       if (infoQ) {
         const s = low(infoList(m).join(" "));
@@ -480,6 +482,18 @@ export default function App() {
               <option value="all">hiddenReason: all</option>
               <option value="yes">hiddenReason: yes</option>
               <option value="no">hiddenReason: no</option>
+            </select>
+
+            <select
+              className={selCls}
+              value={filters.hasNotes}
+              onChange={(e) =>
+                setFilters((x) => ({ ...x, hasNotes: e.target.value }))
+              }
+            >
+              <option value="all">hasNotes: all</option>
+              <option value="yes">hasNotes: yes</option>
+              <option value="no">hasNotes: no</option>
             </select>
 
             <select
