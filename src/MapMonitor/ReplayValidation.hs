@@ -1,5 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
 module MapMonitor.ReplayValidation
 where
@@ -14,17 +15,15 @@ import qualified Data.UUID.V4 as UUID4
 import MapMonitor.API
 import MapMonitor.Common
 import MapMonitor.DB
-import MapMonitor.Integrations
 import MapMonitor.MapCache
 import Network.Minio
 import Protolude hiding (atomically, bracket_, (<.>))
-import RIO (HasLogFunc, displayShow, logError, logInfo, toStrictBytes)
+import RIO (HasLogFunc, displayShow, logError, toStrictBytes)
 import RIO.FilePath
 import qualified RIO.Text as Text
 import RIO.Time (getCurrentTime)
 import System.Process.Typed
 import UnliftIO
-import UnliftIO.Temporary
 
 data SimulationResult
   = SimulationResult

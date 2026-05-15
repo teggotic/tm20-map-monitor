@@ -1,7 +1,9 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
-module MapMonitor.MissingItemsCheck where
+module MapMonitor.MissingItemsCheck
+where
 
 import Data.Aeson
 import Data.Aeson.TH

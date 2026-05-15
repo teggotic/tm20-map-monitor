@@ -2,26 +2,23 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module MapMonitor.Server
 where
 
 import Control.Category (id)
-import Control.Concurrent.STM.TSem
 import Control.Exception (throw)
 import Control.Lens hiding ((.=), (<.>))
 import Control.Retry (limitRetries)
 import Data.Acid
-import Data.Aeson (decode, encodeFile, object, (.=))
-import Data.Aeson.Key (fromString)
-import Data.Aeson.TH (deriveFromJSON)
-import Data.Aeson.Types
 import Data.Cache
 import Data.Fixed
 import Data.IxSet.Typed
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
-import qualified Data.UUID.V4 as UUID4
 import MapMonitor.API
 import MapMonitor.API.Nadeo
 import MapMonitor.API.OpenPlanet
@@ -33,34 +30,26 @@ import MapMonitor.Common
 import MapMonitor.DB
 import MapMonitor.Integrations
 import MapMonitor.ReplayValidation
+import MapMonitor.ServantCache (ResponseCache (..))
 import Network.HTTP.Req
 import qualified Network.HTTP.Types as H
 import Network.Minio
 import Network.Wai as Wai
 import PingRPC
 import Protolude hiding (atomically, finally, threadDelay, wait, withAsync, (<.>))
-import qualified Data.Set as Set
 import RIO (HasLogFunc (..), LogFunc, displayShow, finally, logError, logInfo, toStrictBytes)
-import RIO.FilePath (takeFileName)
 import qualified RIO.Text as T
 import qualified RIO.Text as Text
 import RIO.Time
 import Servant
 import Servant.Auth.Server
 import Servant.Client hiding ((/:))
-import Servant.Multipart as MP
 import Servant.Server
-import System.FilePath ((<.>), (</>))
-import System.IO.Temp (withSystemTempDirectory)
-import System.Process.Typed
 import qualified System.ZMQ4 as ZMQ
 import UnliftIO.Async
-import UnliftIO.Concurrent
 import UnliftIO.Directory (removeFile)
 import UnliftIO.Exception (tryAny)
 import UnliftIO.STM
-import qualified Prelude
-import MapMonitor.ServantCache (ResponseCache(..))
 
 data AppState
   = AppState
@@ -168,7 +157,7 @@ downloadMapsServer st = downloadMap
               runReq (defaultHttpConfig{httpConfigRetryPolicy = limitRetries 0}) $
                 req Network.HTTP.Req.GET (https "trackmania.exchange" /: "mapgbx" /~ mapId) NoReqBody ignoreResponse (responseTimeout (2 * 1000000))
         case result of
-          Left err -> do
+          Left _ -> do
             putText $ "Tmx doesnot work"
             runInClient tmxClientL (tmxSearchMaps TMXSearchMaps{_tmxsm_ids = [mapId], _tmxsm_count = Just 100, _tmxsm_after = Nothing, _tmxsm_from = Nothing, _tmxsm_order1 = Nothing})
               >>= \case
@@ -185,9 +174,9 @@ downloadMapsServer st = downloadMap
                           Left err -> do
                             logError $ "Error: " <> displayShow err
                             return $ Left []
-                          Right res -> do
-                            logInfo $ "Got " <> displayShow (_gmmr_mapList res) <> " maps"
-                            return $ Left $ _gmmrm_downloadUrl <$> _gmmr_mapList res
+                          Right res2 -> do
+                            logInfo $ "Got " <> displayShow (_gmmr_mapList res2) <> " maps"
+                            return $ Left $ _gmmrm_downloadUrl <$> _gmmr_mapList res2
                     _ -> do
                       return $ Left []
           Right _ -> do
@@ -197,7 +186,7 @@ downloadMapsServer st = downloadMap
         Left [tmmap] -> do
           putText $ "Redirecting to map " <> tmmap
           resp $ redirectTo $ tmmap
-        Right mapId -> do
+        Right _ -> do
           putText $ "Redirecting to map " <> show mapId
           resp $ redirectTo $ "https://trackmania.exchange/maps/download/" <> show mapId
         _ -> throw err404
@@ -229,8 +218,9 @@ tmxApiServer = unbeaten :<|> unbeatenV2 :<|> unbeatenLeaderboard :<|> beaten :<|
     collectUnbeatenAtsResponseV2
 
   unbeatenCount = do
-    maps <- filter (\x -> (Protolude.null $ _tmm_info x) && (isNothing $ _tmm_hiddenReason x))
-       <$> filterMaps ((@= (HiddenOnTmx False)) . (@= HasNadeoInfo True) . (@= (TrackType $ Just MT_Race)) . (@= Unbeaten))
+    maps <-
+      filter (\x -> (Protolude.null $ _tmm_info x) && (isNothing $ _tmm_hiddenReason x))
+        <$> filterMaps ((@= (HiddenOnTmx False)) . (@= HasNadeoInfo True) . (@= (TrackType $ Just MT_Race)) . (@= Unbeaten))
     let
       totalUnbeaten = length maps
       totalNonAltNadeo = length $ filter (\x -> not (49 `elem` _tmm_tags x)) maps
@@ -263,7 +253,7 @@ managementApiServer (Authenticated auser) = managementReportMap :<|> managementD
 managementApiServer _ = throwAll err404
 
 trustedUsers :: [Text]
-trustedUsers = ["c331bdbf-2182-4a51-813d-87d6f0f209c5", "65ce1935-d166-42b3-89a6-6345ccf41865", "59b84907-59fb-4455-b31d-b0cc44c36ec7", "bce4d579-dc66-43b5-9d57-eb1fb58dd450", "296a77c2-1c19-4236-9a3e-28c8c01e6312", "52f40bee-ef2e-44b9-baf0-067f39dbc45a", "247d5f09-eaa4-4495-9363-b7e69dd42db5", "98b7dfd7-6706-47f4-9b47-6362e9daf7a2", "f520329f-cbb7-45f4-83d3-9b8681a21c6c"]
+trustedUsers = ["c331bdbf-2182-4a51-813d-87d6f0f209c5", "65ce1935-d166-42b3-89a6-6345ccf41865", "59b84907-59fb-4455-b31d-b0cc44c36ec7", "bce4d579-dc66-43b5-9d57-eb1fb58dd450", "296a77c2-1c19-4236-9a3e-28c8c01e6312", "52f40bee-ef2e-44b9-baf0-067f39dbc45a", "247d5f09-eaa4-4495-9363-b7e69dd42db5", "98b7dfd7-6706-47f4-9b47-6362e9daf7a2", "f520329f-cbb7-45f4-83d3-9b8681a21c6c", "cd81f22a-c92f-48b9-8aa3-72f904c62b66"]
 
 authApiServer :: ServerT AuthAPI AppM
 authApiServer = authOpenplanetToken :<|> authIsTrusted
@@ -339,30 +329,31 @@ server1 st staticPath = tmxApiServer :<|> downloadMapsServer st :<|> managementA
 
   dbDump = do
     db <- queryAcid GetMapMonitorState
-    return $ ExportDBResponse
-      { _edr_maps = _mms_maps db @= HiddenOnTmx False
-      }
+    return $
+      ExportDBResponse
+        { _edr_maps = _mms_maps db @= HiddenOnTmx False
+        }
 
 fallbackApp :: Application
-fallbackApp _ respond = do
-  respond $ responseLBS H.status404 [] ";...;"
+fallbackApp _ sendResponse = do
+  sendResponse $ responseLBS H.status404 [] ";...;"
 
 app :: Servant.Server.Context '[CookieSettings, JWTSettings, ResponseCache] -> AppState -> Application
-app cfg state req respond = do
-  -- putText $ "Request: " <> show req
+app cfg appState inReq sendResponse = do
+  -- putText $ "Request: " <> show inReq
   let
-    staticPath = state ^. appSettingsL . settings_static
+    staticPath = appState ^. appSettingsL . settings_static
     servantApp =
       serveWithContext mapMonitorAPI cfg $
         hoistServerWithContext
           mapMonitorAPI
           (Proxy :: Proxy '[CookieSettings, JWTSettings, ResponseCache])
-          (`runReaderT` state)
-          (server1 state staticPath)
-  servantApp req $ \res ->
+          (`runReaderT` appState)
+          (server1 appState staticPath)
+  servantApp inReq $ \res ->
     if is404 res
-      then fallbackApp req respond
-      else respond res
+      then fallbackApp inReq sendResponse
+      else sendResponse res
 
 is404 :: Wai.Response -> Bool
 is404 res =
@@ -411,36 +402,41 @@ collectUnbeatenAtsResponse = do
     unbeatenMaps =
       flip fmap allMaps $ \tmmap ->
         let
-          hiddenInfo' = ( Text.intercalate "; " $ catMaybes
-                (map (\(k, v) -> bool Nothing (Just v) (Set.member k $ _tmm_info tmmap))
-                     [ (TMBrokenPhysics, "broken physics")
-                     , (TMCheatedAt, "cheated at")
-                     ])
-                )
+          hiddenInfo' =
+            ( Text.intercalate "; " $
+                catMaybes
+                  ( map
+                      (\(k, v) -> bool Nothing (Just v) (Set.member k $ _tmm_info tmmap))
+                      [ (TMBrokenPhysics, "broken physics")
+                      , (TMCheatedAt, "cheated at")
+                      ]
+                  )
+            )
           hiddenInfo = if T.null hiddenInfo' then Nothing else Just hiddenInfo'
-         in UnbeatenAtTrack
-          { _uat_trackId = _tmm_tmxId tmmap
-          , _uat_trackUid = _tmm_uid tmmap
-          , _uat_trackName = _tmm_name tmmap
-          , _uat_authorLogin = fromMaybe "N/A" (_tmm_authorUid tmmap)
-          , _uat_tags = Text.intercalate "," (show <$> _tmm_tags tmmap)
-          , _uat_mapType = "TM_Race"
-          , _uat_authorTime = _tmm_authorMedal tmmap
-          , _uat_wr = fromMaybe (-1) (_tmmr_time <$> _tmm_currentWR tmmap)
-          , _uat_lastChecked = 0
-          , _uat_nbPlayers = fromMaybe 123456 (_tmm_nbPlayers tmmap)
-          , _uat_isHidden = isJust (_tmm_hiddenReason tmmap) || isJust hiddenInfo || Just True == _tmm_hasClones tmmap
-          , _uat_reason = fromMaybe "" (_tmm_hiddenReason tmmap <|> hiddenInfo <|> bool Nothing (Just "clone car map") (_tmm_hasClones tmmap == Just True))
-          , _uat_atSetByPlugin = fromMaybe False (_tmm_atSetByPlugin tmmap)
-          , _uat_reported = (\(k, (_, r)) -> (k, r)) <$> Map.assocs (_tmm_reportedBy tmmap)
-          , _uat_uploadedTimestamp = maybe 0 (nominalDiffTimeToSeconds . utcTimeToPOSIXSeconds) (_tmm_uploadedAt tmmap)
-          , _uat_validation =
-              case _tmm_validationReplay tmmap of
-                Nothing -> (False, "")
-                Just (url, _) -> (True, maybe "" (\x -> "https://" <> "map-monitor-replays" <> "." <> host <> "/ghosts/" <> x <> ".Ghost.Gbx") url)
-          , _uat_fileSize = fromMaybe (-1) $ _tmm_fileSize tmmap
-          , _uat_info = Set.toList $ _tmm_info tmmap
-          }
+         in
+          UnbeatenAtTrack
+            { _uat_trackId = _tmm_tmxId tmmap
+            , _uat_trackUid = _tmm_uid tmmap
+            , _uat_trackName = _tmm_name tmmap
+            , _uat_authorLogin = fromMaybe "N/A" (_tmm_authorUid tmmap)
+            , _uat_tags = Text.intercalate "," (show <$> _tmm_tags tmmap)
+            , _uat_mapType = "TM_Race"
+            , _uat_authorTime = _tmm_authorMedal tmmap
+            , _uat_wr = fromMaybe (-1) (_tmmr_time <$> _tmm_currentWR tmmap)
+            , _uat_lastChecked = 0
+            , _uat_nbPlayers = fromMaybe 123456 (_tmm_nbPlayers tmmap)
+            , _uat_isHidden = isJust (_tmm_hiddenReason tmmap) || isJust hiddenInfo || Just True == _tmm_hasClones tmmap
+            , _uat_reason = fromMaybe "" (_tmm_hiddenReason tmmap <|> hiddenInfo <|> bool Nothing (Just "clone car map") (_tmm_hasClones tmmap == Just True))
+            , _uat_atSetByPlugin = fromMaybe False (_tmm_atSetByPlugin tmmap)
+            , _uat_reported = (\(k, (_, r)) -> (k, r)) <$> Map.assocs (_tmm_reportedBy tmmap)
+            , _uat_uploadedTimestamp = maybe 0 (nominalDiffTimeToSeconds . utcTimeToPOSIXSeconds) (_tmm_uploadedAt tmmap)
+            , _uat_validation =
+                case _tmm_validationReplay tmmap of
+                  Nothing -> (False, "")
+                  Just (url, _) -> (True, maybe "" (\x -> "https://" <> "map-monitor-replays" <> "." <> host <> "/ghosts/" <> x <> ".Ghost.Gbx") url)
+            , _uat_fileSize = fromMaybe (-1) $ _tmm_fileSize tmmap
+            , _uat_info = Set.toList $ _tmm_info tmmap
+            }
 
   return $
     UnbeatenAtsResponse

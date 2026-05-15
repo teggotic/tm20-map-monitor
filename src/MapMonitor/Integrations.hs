@@ -21,6 +21,7 @@ import MapMonitor.ATCheck (checkAtSetByPlugin)
 import MapMonitor.Common
 import MapMonitor.DB
 import MapMonitor.MapCache
+import MapMonitor.MapMonitorTools
 import MapMonitor.MissingItemsCheck
 import PingRPC
 import Protolude hiding (atomically, forkIO, threadDelay, yield, (<.>))
@@ -29,6 +30,7 @@ import qualified RIO.Map as Map
 import RIO.Time
 import UnliftIO
 import UnliftIO.Concurrent hiding (yield)
+import qualified Prelude
 
 tmxMapToTMMap :: TMXSearchMapsMap -> Maybe TMMap
 tmxMapToTMMap tmx = do
@@ -189,7 +191,7 @@ nadeoMapInfoC :: (MonadIO m, MonadFail m, MonadReader env m, HasLogFunc env, Has
 nadeoMapInfoC = do
   chunkedC 100
     .| mapMC \tmmaps -> do
-      logInfo $ "Pulling info for maps " <> displayShow (unTMXId . _tmm_tmxId $ fromMaybe undefined $ head tmmaps) <> "-" <> displayShow (unTMXId . _tmm_tmxId $ last tmmaps)
+      logInfo $ "Pulling info for maps " <> displayShow (unTMXId . _tmm_tmxId $ fromMaybe (Prelude.error "nadeoMapInfoC: chunkedC returned emptyList") $ head tmmaps) <> "-" <> displayShow (unTMXId . _tmm_tmxId $ last tmmaps)
       updates <-
         nadeoGetMapMultiple (IdsList $ fmap _tmm_uid tmmaps)
           >>= \case
@@ -202,10 +204,11 @@ nadeoMapInfoC = do
         [ ( case mpM of
               Nothing -> patch
               Just mp ->
-                patch & tmmp_actions %~
-                    ( (TMPAuthorUid (Just $ _gmmrm_author mp):)
-                    . (TMPUploadedAt (Just $ unUTCTimestamp $ _gmmrm_uploadTimestamp mp):)
-                    )
+                patch
+                  & tmmp_actions
+                    %~ ( (TMPAuthorUid (Just $ _gmmrm_author mp) :)
+                           . (TMPUploadedAt (Just $ unUTCTimestamp $ _gmmrm_uploadTimestamp mp) :)
+                       )
           , tmmap
           )
         | tmmap <- tmmaps
@@ -349,13 +352,19 @@ processMapFileQueue :: (MonadUnliftIO m, MonadReader env m, HasLogFunc env, HasS
 processMapFileQueue queue = do
   atomically (readTQueue queue) >>= checkMapFile
 
-checkMapFile :: (MonadUnliftIO m, MonadReader env m, HasLogFunc env,  HasS3Connection env, HasState env, HasPubRpcSocket env) => TMMap -> m ()
+checkMapFile :: (MonadUnliftIO m, MonadReader env m, HasLogFunc env, HasS3Connection env, HasState env, HasPubRpcSocket env) => TMMap -> m ()
 checkMapFile tmmap = do
   atSetByPlugin <- checkAtSetByPlugin tmmap
   logInfo $ "Checking AT set by plugin for map #" <> displayShow (unTMXId $ _tmm_tmxId tmmap) <> ": " <> displayShow atSetByPlugin
   Protolude.void $ withAcid1 updateMaps $ [TMMapPatch (_tmm_tmxId tmmap) [TMPAtSetByPlugin atSetByPlugin]]
 
   updateMapSize tmmap
+
+  mapHasClones tmmap
+    >>= \case
+      Just x -> do
+        Protolude.void $ withAcid1 updateMaps $ [TMMapPatch (_tmm_tmxId tmmap) [TMPClones $ Just x]]
+      _ -> return ()
 
   checkMissingItems tmmap
     >>= \case
@@ -377,8 +386,8 @@ filterMaps f = do
   st <- queryAcid GetMapMonitorState
   return $ IxSet.toList $ f $ _mms_maps st
 
-updateMapSize :: (MonadUnliftIO m, MonadReader env m, HasS3Connection env,  HasLogFunc env, HasState env) => TMMap -> m ()
+updateMapSize :: (MonadUnliftIO m, MonadReader env m, HasS3Connection env, HasLogFunc env, HasState env) => TMMap -> m ()
 updateMapSize tmmap =
   mapFileSize tmmap >>= \case
     Left err -> logError $ displayShow err
-    Right sz -> Protolude.void $ withAcid1 updateMaps  [ TMMapPatch (_tmm_tmxId tmmap) [TMPFileSize sz]]
+    Right sz -> Protolude.void $ withAcid1 updateMaps [TMMapPatch (_tmm_tmxId tmmap) [TMPFileSize sz]]

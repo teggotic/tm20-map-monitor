@@ -1,6 +1,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
 module MapMonitor.API
 where
@@ -9,17 +10,15 @@ import Data.Aeson
 import Data.Aeson.TH
 import MapMonitor.CachedAPIResponses
 import MapMonitor.DB
+import MapMonitor.ServantCache
 import Network.HTTP.Media ((//), (/:))
 import Protolude
 import qualified RIO.ByteString as BS
-import RIO.List
-import RIO.Prelude.Types
 import qualified RIO.Text as Text
 import Servant.API
 import Servant.Auth
 import Servant.Auth.JWT
 import Servant.Multipart
-import MapMonitor.ServantCache
 
 data AUser = AUser
   { _auser_uid :: !Text
@@ -44,7 +43,7 @@ type DownloadMapAPI =
 type TMXApi =
   "tmx"
     :> ( "unbeaten_ats" :> Cached 1200 (UnbeatenAtsResponse UnbeatenAtTrack) :> Get '[JSON] (UnbeatenAtsResponse UnbeatenAtTrack)
-    :<|> "unbeaten_ats" :> "v2" :> Cached 1200 (UnbeatenAtsResponse UnbeatenAtTrack) :> Get '[JSON] (UnbeatenAtsResponse UnbeatenAtTrack)
+           :<|> "unbeaten_ats" :> "v2" :> Cached 1200 (UnbeatenAtsResponse UnbeatenAtTrack) :> Get '[JSON] (UnbeatenAtsResponse UnbeatenAtTrack)
            :<|> "unbeaten_ats" :> "leaderboard" :> Get '[JSON] UnbeatenAtsLeaderboardResponse
            :<|> "recently_beaten_ats" :> Cached 1200 RecentlyBeatenAtsResponse :> Get '[JSON] RecentlyBeatenAtsResponse
            :<|> "unbeaten_count" :> Get '[PlainText] Text
@@ -101,8 +100,8 @@ type HtmxAPI =
            :<|> ("map-by-tmxid" :> QueryParam' '[Required] "tmxid" Text :> Get '[HTML] Text)
        )
 
-data ExportDBResponse =
-  ExportDBResponse
+data ExportDBResponse
+  = ExportDBResponse
   { _edr_maps :: IxEntry
   }
 

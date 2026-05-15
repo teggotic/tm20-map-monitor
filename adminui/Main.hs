@@ -6,26 +6,25 @@
 
 module Main where
 
-
 import Control.Monad.IO.Class (liftIO)
 import Data.Acid (AcidState)
 import qualified Data.Acid as Acid
+import Data.Acid.Remote
 import Data.Aeson (FromJSON, ToJSON, Value (Array), object, (.=))
 import qualified Data.Aeson as Aeson
+import Data.Cache (newCache, purge)
 import qualified Data.IxSet.Typed as IxSet
 import Data.Proxy (Proxy (..))
 import qualified Data.Text as T
 import GHC.Generics (Generic)
 import MapMonitor.DB
+import MapMonitor.ServantCache (Cached, ResponseCache (ResponseCache))
 import Network.Wai (Application)
 import Network.Wai.Handler.Warp (run)
-import Servant
-import Data.Acid.Remote
-import Network.Wai.Middleware.Cors (simpleCors, CorsResourcePolicy (..), simpleCorsResourcePolicy, cors)
-import MapMonitor.ServantCache (ResponseCache (ResponseCache), Cached)
-import Data.Cache (newCache, purge)
-import System.Clock (TimeSpec(TimeSpec))
+import Network.Wai.Middleware.Cors (CorsResourcePolicy (..), cors, simpleCors, simpleCorsResourcePolicy)
 import Protolude (getArgs)
+import Servant
+import System.Clock (TimeSpec (TimeSpec))
 
 type AdminAPI =
   "admin" :> "api" :> "maps" :> Cached 1200 MapsResponse :> Get '[JSON] MapsResponse
@@ -70,14 +69,14 @@ runAdminApi port acid = do
   cache <- newCache (Just $ TimeSpec 60 0)
   run port $
     cors (const $ Just policy) $
-    (app (ResponseCache cache) acid)
-  where
-    policy =
-      simpleCorsResourcePolicy
-        { corsOrigins = Nothing
-        , corsMethods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
-        , corsRequestHeaders = ["Content-Type", "Authorization"]
-        }
+      (app (ResponseCache cache) acid)
+ where
+  policy =
+    simpleCorsResourcePolicy
+      { corsOrigins = Nothing
+      , corsMethods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+      , corsRequestHeaders = ["Content-Type", "Authorization"]
+      }
 
 main :: IO ()
 main = do

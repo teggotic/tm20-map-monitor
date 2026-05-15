@@ -36,17 +36,14 @@ import Control.Concurrent.STM.TSem
 import Control.Lens
 import Data.Acid
 import Data.Acid.Advanced
-import Data.Time
+import Data.Type.Equality
 import Dhall
-import MapMonitor.CachedAPIResponses
 import MapMonitor.DB
+import MapMonitor.ServantCache (ResponseCache)
 import Network.Minio (MinioConn)
 import PingRPC
 import Protolude
-import Servant.Client
-import UnliftIO.Retry
 import UnliftIO.STM
-import MapMonitor.ServantCache (ResponseCache)
 
 data AppSyncVars
   = AppSyncVars
@@ -104,9 +101,11 @@ class HasS3Connection env where
 class HasResponseCache env where
   responseCacheL :: Lens' env ResponseCache
 
+queryAcid :: (MethodState b ~ MapMonitorState, MonadReader s m, HasState s, QueryEvent b, MonadIO m) => b -> m (MethodResult b)
 queryAcid q =
   view stateL >>= flip query' q
 
+updateAcid :: (MethodState b ~ MapMonitorState, MonadReader s m, HasState s, UpdateEvent b, MonadIO m) => b -> m (MethodResult b)
 updateAcid u =
   view stateL >>= flip update' u
 

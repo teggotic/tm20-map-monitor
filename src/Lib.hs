@@ -2,18 +2,20 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
 module Lib where
 
 import Control.Concurrent.STM.TSem
+import Control.Lens (view)
 import Control.Lens.TH
 import Data.Acid
 import Data.Acid.Remote (openRemoteState, skipAuthenticationPerform)
 import Data.Cache
 import Dhall
-import MapMonitor.CachedAPIResponses
 import MapMonitor.Common
 import MapMonitor.DB
+import MapMonitor.ServantCache
 import MapMonitor.Server
 import Network.HTTP.Client as NHC (ManagerSettings (managerModifyRequest), Request (requestHeaders), newManager)
 import Network.HTTP.Client.TLS
@@ -21,20 +23,18 @@ import Network.HTTP.Types.Header (hUserAgent)
 import Network.Minio
 import Network.Socket (PortNumber)
 import PingRPC (withPubSocket)
-import Protolude hiding (killThread, atomically, bracket, forkIO, threadDelay, to, toList, try, withFile)
-import RIO (BufferMode (LineBuffering), IsString (fromString), LogFunc, MonadUnliftIO, hSetBuffering, logOptionsHandle, newTMVarIO, setLogUseTime, withFile, withLogFunc)
+import Protolude hiding (atomically, bracket, forkIO, killThread, threadDelay, to, toList, try, withFile)
+import RIO (BufferMode (LineBuffering), IsString (fromString), MonadUnliftIO, hSetBuffering, logOptionsHandle, newTMVarIO, setLogUseTime, withFile, withLogFunc)
 import qualified RIO.Text as T
 import RIO.Time (getCurrentTime)
 import Servant.Auth.Server
 import Servant.Client
-import System.Directory (doesFileExist)
-import UnliftIO.Exception (bracket)
-import UnliftIO.STM
 import System.Clock
-import MapMonitor.ServantCache
-import UnliftIO.Resource
+import System.Directory (doesFileExist)
 import UnliftIO.Concurrent
-import Control.Lens (view)
+import UnliftIO.Exception (bracket)
+import UnliftIO.Resource
+import UnliftIO.STM
 
 data CollectCacheState
   = CollectCacheState

@@ -7,6 +7,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
+
 -- {-# OPTIONS_GHC -ddump-splices #-}
 
 module MapMonitor.DB (
@@ -66,8 +67,8 @@ import Data.Time
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 import GHC.Exts (IsList (fromList))
 import Protolude
-import qualified RIO.Text as Text
 import qualified RIO.Set as Set
+import qualified RIO.Text as Text
 
 data TMXMapType
   = MT_Race
@@ -393,24 +394,25 @@ instance Migrate TMMapPatch where
   migrate (TMMapPatch_v4{..}) =
     TMMapPatch
       { _tmmp_tmxId = v4_tmmp_tmxId
-      , _tmmp_actions = catMaybes $
-        [ TMPUid <$> v4_tmmp_uid
-        , TMPName <$> v4_tmmp_name
-        , TMPAuthorMedal <$> v4_tmmp_authorMedal
-        , TMPAuthorUid <$> v4_tmmp_authorUid
-        , TMPTags <$> v4_tmmp_tags
-        , TMPCurrentWR <$> v4_tmmp_currentWR
-        , TMPUploadedAt <$> v4_tmmp_uploadedAt
-        , TMPHiddenReason <$> v4_tmmp_hiddenReason
-        , TMPAtSetByPlugin <$> v4_tmmp_atSetByPlugin
-        , TMPNbPlayers <$> v4_tmmp_nbPlayers
-        , TMPReportedBy <$> v4_tmmp_reportedBy
-        , TMPMapType <$> v4_tmmp_mapType
-        , TMPMapVersions <$> v4_tmmp_mapVersions
-        , TMPHiddenOnTmx <$> v4_tmmp_hiddenOnTmx
-        , TMPBeatenPingSent <$> v4_tmmp_beatenPingSent
-        , TMPValidationReplay <$> v4_tmmp_validationReplay
-        ]
+      , _tmmp_actions =
+          catMaybes $
+            [ TMPUid <$> v4_tmmp_uid
+            , TMPName <$> v4_tmmp_name
+            , TMPAuthorMedal <$> v4_tmmp_authorMedal
+            , TMPAuthorUid <$> v4_tmmp_authorUid
+            , TMPTags <$> v4_tmmp_tags
+            , TMPCurrentWR <$> v4_tmmp_currentWR
+            , TMPUploadedAt <$> v4_tmmp_uploadedAt
+            , TMPHiddenReason <$> v4_tmmp_hiddenReason
+            , TMPAtSetByPlugin <$> v4_tmmp_atSetByPlugin
+            , TMPNbPlayers <$> v4_tmmp_nbPlayers
+            , TMPReportedBy <$> v4_tmmp_reportedBy
+            , TMPMapType <$> v4_tmmp_mapType
+            , TMPMapVersions <$> v4_tmmp_mapVersions
+            , TMPHiddenOnTmx <$> v4_tmmp_hiddenOnTmx
+            , TMPBeatenPingSent <$> v4_tmmp_beatenPingSent
+            , TMPValidationReplay <$> v4_tmmp_validationReplay
+            ]
       }
 
 $(deriveSafeCopy 5 'extension ''TMMapPatch)
@@ -421,7 +423,7 @@ defPatch idx = TMMapPatch idx []
 patchIsEmpty :: TMMapPatch -> Bool
 patchIsEmpty = Protolude.null . _tmmp_actions
 
-applyMapChanges :: Ord k => Map k a -> Map k (Maybe a) -> Map k a
+applyMapChanges :: (Ord k) => Map k a -> Map k (Maybe a) -> Map k a
 applyMapChanges mp updates = foldl' (\acc (k, val) -> Map.alter (const val) k acc) mp (Map.assocs updates)
 
 applyPatch :: TMMapPatch -> TMMap -> TMMap
@@ -467,7 +469,7 @@ data MapMonitorState
 
 instance Migrate MapMonitorState where
   type MigrateFrom MapMonitorState = MapMonitorState_v3
-  migrate (MapMonitorState_v3 {..}) =
+  migrate (MapMonitorState_v3{..}) =
     MapMonitorState v3_mms_maps mempty
 
 $(deriveSafeCopy 4 'extension ''MapMonitorState)

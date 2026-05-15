@@ -71,7 +71,6 @@ instance ToJSON UnbeatenAtTrack where
         , toJSON _uat_info
         ]
 
-
 data UnbeatenAtsResponse t
   = UnbeatenAtsResponse
   { _uar_keys :: ![Text]

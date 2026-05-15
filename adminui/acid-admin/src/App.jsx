@@ -48,12 +48,11 @@ function typeLabel(v) {
   }
 }
 
-const INFO_OPTIONS = ["CheatedAt", "BrokenPhysics", "LowInputStrat"];
+const INFO_OPTIONS = ["CheatedAt", "BrokenPhysics"];
 
 function normalizeInfoValue(x) {
   const s = String(x ?? "");
-  if (s.startsWith("TM")) return s.slice(2);
-  return s;
+  return s.startsWith("TM") ? s.slice(2) : s;
 }
 
 function infoList(m) {
@@ -150,7 +149,8 @@ export default function App() {
     clones: "all",
     validation: "all",
     hasHiddenReason: "all",
-    info: "",
+    info: [],
+    hasInfo: "all",
     uploadedFrom: "",
     uploadedTo: "",
     fileMin: "",
@@ -205,13 +205,15 @@ export default function App() {
 
   const filtered = useMemo(() => {
     const q = low(f.search).trim();
-    const infoQ = low(f.info).trim();
     const from = f.uploadedFrom ? new Date(f.uploadedFrom).getTime() : null;
     const to = f.uploadedTo
       ? new Date(f.uploadedTo).getTime() + 24 * 3600 * 1000 - 1
       : null;
     const fileMin = numOrNull(f.fileMin);
     const fileMax = numOrNull(f.fileMax);
+    const selectedInfo = Array.isArray(f.info)
+      ? f.info.map(normalizeInfoValue).filter(Boolean)
+      : [];
 
     return maps.filter((m) => {
       if (q) {
@@ -239,9 +241,10 @@ export default function App() {
       if (!tri(m.hiddenReason != null && String(m.hiddenReason).trim() !== "", f.hasHiddenReason)) return false;
       if (!tri(Object.keys(m.reportedBy).length > 0, f.hasNotes)) return false;
 
-      if (infoQ) {
-        const s = low(infoList(m).join(" "));
-        if (!s.includes(infoQ)) return false;
+      if (!tri(m.info.length > 0, f.hasInfo)) return false;
+      if (selectedInfo.length > 0) {
+        const mapInfo = infoList(m);
+        if (!selectedInfo.some((opt) => mapInfo.includes(opt))) return false;
       }
 
       if (from != null || to != null) {
@@ -545,14 +548,27 @@ export default function App() {
               <option value="no">validationReplay: no</option>
             </select>
 
-            <input
-              className={inputCls}
-              placeholder="info contains"
-              value={filters.info}
+            <select
+              className={selCls}
+              value={filters.hasInfo}
               onChange={(e) =>
-                setFilters((x) => ({ ...x, info: e.target.value }))
+                setFilters((x) => ({ ...x, hasInfo: e.target.value }))
               }
-            />
+            >
+              <option value="all">hasInfo: all</option>
+              <option value="yes">hasInfo: yes</option>
+              <option value="no">hasInfo: no</option>
+            </select>
+
+            <div>
+              <div className="mb-1 text-xs text-slate-500">include info</div>
+              <InfoMultiSelect
+                value={filters.info}
+                onChange={(next) =>
+                  setFilters((x) => ({ ...x, info: next }))
+                }
+              />
+            </div>
 
             <div>
               <div className="mb-1 text-xs text-slate-500">uploaded from</div>
@@ -612,11 +628,12 @@ export default function App() {
                   clones: "all",
                   validation: "all",
                   hasHiddenReason: "all",
-                  info: "",
+                  info: [],
                   uploadedFrom: "",
                   uploadedTo: "",
                   fileMin: "",
                   fileMax: "",
+                  hasNotes: "all",
                 })
               }
             >

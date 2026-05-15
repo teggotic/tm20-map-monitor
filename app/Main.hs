@@ -1,6 +1,7 @@
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
-module Main (main) where
+module Main where
 
 import Data.Acid
 import Data.Acid.Remote (acidServer, skipAuthenticationCheck)
@@ -20,16 +21,12 @@ import Protolude hiding (atomically, bracket, forkIO, killThread, threadDelay, t
 import RIO (MonadUnliftIO, displayShow, logError, logInfo)
 import Servant.Auth.Server
 import Servant.Server
-import UnliftIO.Concurrent (forkIO, killThread, threadDelay)
+import UnliftIO.Concurrent (threadDelay)
 import UnliftIO.STM
 
 import Options.Applicative
 import UnliftIO.Exception
 import UnliftIO.Resource
-import MapMonitor.ServantCache
-import Control.Lens (view)
-import MapMonitor.Common
-import Data.Cache (toList)
 
 data Options
   = Options
