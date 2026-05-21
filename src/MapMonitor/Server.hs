@@ -219,8 +219,8 @@ tmxApiServer = unbeaten :<|> unbeatenV2 :<|> unbeatenLeaderboard :<|> beaten :<|
 
   unbeatenCount = do
     maps <-
-      filter (\x -> (Protolude.null $ _tmm_info x) && (isNothing $ _tmm_hiddenReason x))
-        <$> filterMaps ((@= (HiddenOnTmx False)) . (@= HasNadeoInfo True) . (@= (TrackType $ Just MT_Race)) . (@= Unbeaten))
+      filter (\x -> (Protolude.null $ _tmm_info x) && (isNothing $ _tmm_hiddenReason x) && (_tmm_hasClones x /= Just True) && not (_tmm_hiddenOnTmx x))
+        <$> filterMaps ((@= HasNadeoInfo True) . (@= (TrackType $ Just MT_Race)) . (@= Unbeaten))
     let
       totalUnbeaten = length maps
       totalNonAltNadeo = length $ filter (\x -> not (49 `elem` _tmm_tags x)) maps

@@ -570,7 +570,7 @@ getMapsByIds ids = do
 
 getMaps :: Query MapMonitorState [TMMap]
 getMaps = do
-  asks $ IxSet.toList . (@= (HiddenOnTmx False)) . (@= HasNadeoInfo True) . (@= (TrackType $ Just MT_Race)) . (@= Unbeaten) . _mms_maps
+  asks $ filter (\x -> (_tmm_hasClones x /= Just True)) . IxSet.toList . (@= (HiddenOnTmx False)) . (@= HasNadeoInfo True) . (@= (TrackType $ Just MT_Race)) . (@= Unbeaten) . _mms_maps
 
 getMapMonitorState :: Query MapMonitorState MapMonitorState
 getMapMonitorState = ask
