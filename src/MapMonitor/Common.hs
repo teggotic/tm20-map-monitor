@@ -1,6 +1,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE UndecidableInstances #-}
+
 {-# LANGUAGE NoImplicitPrelude #-}
 
 module MapMonitor.Common (
@@ -14,6 +15,9 @@ module MapMonitor.Common (
   HasCheckMapFileQueue (..),
   HasS3Connection (..),
   HasResponseCache (..),
+  HasNotifyCache (..),
+  HasGridDB (..),
+  HasGridConnectionsCache (..),
   queryAcid,
   updateAcid,
   withAcid1,
@@ -44,6 +48,8 @@ import Network.Minio (MinioConn)
 import PingRPC
 import Protolude
 import UnliftIO.STM
+import Data.Cache
+import MapMonitor.GridDB(BBTable, ID, PosixTS)
 
 data AppSyncVars
   = AppSyncVars
@@ -88,6 +94,9 @@ class HasAppSettings env where
 class HasState a where
   stateL :: Lens' a (AcidState MapMonitorState)
 
+class HasGridDB a where
+  gridDBL :: Lens' a (AcidState BBTable)
+
 class HasBeatenMapPings env where
   beatenMapPingsL :: Lens' env (TQueue PingRPCMessage)
 
@@ -100,6 +109,12 @@ class HasS3Connection env where
 
 class HasResponseCache env where
   responseCacheL :: Lens' env ResponseCache
+
+class HasNotifyCache env where
+  notifyCacheL :: Lens' env (Cache Text ())
+
+class HasGridConnectionsCache env where
+  gridConnectionCacheL :: Lens' env (Cache ID (Map Text PosixTS))
 
 queryAcid :: (MethodState b ~ MapMonitorState, MonadReader s m, HasState s, QueryEvent b, MonadIO m) => b -> m (MethodResult b)
 queryAcid q =

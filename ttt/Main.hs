@@ -29,7 +29,7 @@ import UnliftIO.STM
 
 downloadTMXMaps startId = do
   q <- newTBQueueIO 20
-  runLocally $ do
+  runRemotely 9099 $ do
     st <- ask
     forM_ [(0 :: Int) .. 4] $ \_ -> do
       void $ forkIO $ forever do
@@ -93,13 +93,13 @@ main = do
     ["download-all-tmx", readMaybe -> startId] -> do
       downloadTMXMaps startId
     ["upload-notes", mapFile] -> do
-      runLocally $ do
+      runRemotely 9099 $ do
         conn <- view s3ConnL
         res <- liftIO $ runMinioWith conn $ do
           fPutObject "tm20" (T.pack $ "notes" </> takeFileName mapFile) mapFile defaultPutObjectOptions
         print res
     ["upload-map", mapFile] -> do
-      runLocally $ do
+      runRemotely 9099 $ do
         conn <- view s3ConnL
         res <- liftIO $ runMinioWith conn $ do
           fPutObject "map-monitor-test" (T.pack $ takeFileName mapFile) mapFile defaultPutObjectOptions

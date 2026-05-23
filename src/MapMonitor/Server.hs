@@ -4,10 +4,12 @@
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-missing-export-lists #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module MapMonitor.Server
 where
 
+import Data.UUID.V4
 import Control.Category (id)
 import Control.Exception (throw)
 import Control.Lens hiding ((.=), (<.>))
@@ -21,11 +23,11 @@ import qualified Data.Set as Set
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import MapMonitor.API
 import MapMonitor.API.Nadeo
+import qualified Data.IxSet.Typed as IS
 import MapMonitor.API.OpenPlanet
 import MapMonitor.API.TMX
 import MapMonitor.API.Util
 import MapMonitor.API.XertroV
-import MapMonitor.CachedAPIResponses
 import MapMonitor.Common
 import MapMonitor.DB
 import MapMonitor.Integrations
@@ -36,7 +38,7 @@ import qualified Network.HTTP.Types as H
 import Network.Minio
 import Network.Wai as Wai
 import PingRPC
-import Protolude hiding (atomically, finally, threadDelay, wait, withAsync, (<.>))
+import Protolude hiding (forkIO, atomically, finally, threadDelay, wait, withAsync, (<.>))
 import RIO (HasLogFunc (..), LogFunc, displayShow, finally, logError, logInfo, toStrictBytes)
 import qualified RIO.Text as T
 import qualified RIO.Text as Text
@@ -49,7 +51,19 @@ import qualified System.ZMQ4 as ZMQ
 import UnliftIO.Async
 import UnliftIO.Directory (removeFile)
 import UnliftIO.Exception (tryAny)
+import UnliftIO.Concurrent
 import UnliftIO.STM
+import Conduit
+import System.Clock (getTime, Clock (Monotonic), TimeSpec (TimeSpec))
+import MapMonitor.GridDB (BBTable, GetBoard (..), BBTableUpdate (..), Grid (..), ID (..), UpdateBBTable (..), GetLastBoards (..), PosixTS (..), GetBoardUpdatedAfter (..), ChatMessage (..))
+import Data.Acid.Advanced (query', update')
+import Data.UUID (toString)
+import UnliftIO.Temporary
+import Network.HTTP.Req.Conduit (responseBodySource)
+import RIO.FilePath ((</>))
+import System.Process.Typed (proc, runProcess_)
+
+type GridConnectionsCache = Cache ID (Map Text PosixTS)
 
 data AppState
   = AppState
@@ -73,6 +87,10 @@ data AppState
   , _appState_syncVars :: !AppSyncVars
   , _appState_displayNamesCache :: !(Cache Text Text)
   , _appState_responseCache :: !ResponseCache
+  , _appState_notifyCache :: !(Cache Text ())
+  , _appState_gridDB :: (AcidState BBTable)
+  , _appState_thumbnailCache :: !(Cache Int ())
+  , _appState_gridConnectionCache :: !GridConnectionsCache
   }
 
 $(makeLenses ''AppState)
@@ -132,6 +150,15 @@ instance HasS3Connection AppState where
 instance HasResponseCache AppState where
   responseCacheL = appState_responseCache
 
+instance HasNotifyCache AppState where
+  notifyCacheL = appState_notifyCache
+
+instance HasGridDB AppState where
+  gridDBL = appState_gridDB
+
+instance HasGridConnectionsCache AppState where
+  gridConnectionCacheL = appState_gridConnectionCache
+  
 type AppM = ReaderT AppState Servant.Server.Handler
 
 mapMonitorAPI :: Proxy MapMonitorAPI
@@ -144,7 +171,7 @@ redirectTo url =
     "Redirect"
 
 downloadMapsServer :: AppState -> ServerT DownloadMapAPI AppM
-downloadMapsServer st = downloadMap
+downloadMapsServer st = downloadMap :<|> mapThumbnail :<|> notifyMapBeaten
  where
   downloadMap :: Int -> ServerT Raw AppM
   downloadMap mapId = do
@@ -191,13 +218,75 @@ downloadMapsServer st = downloadMap
           resp $ redirectTo $ "https://trackmania.exchange/maps/download/" <> show mapId
         _ -> throw err404
 
+  mapThumbnail :: Int -> ServerT Raw AppM
+  mapThumbnail mapId = do
+    Tagged $ \_ resp -> do
+      url <- liftIO $ flip runReaderT st $ do
+        conn <- view s3ConnL
+        buck <- view s3BucketL
+        host <- view $ appSettingsL . settings_s3_creds . s3_creds_host
+        statE <- liftIO $ runMinioWith conn do
+          statObject buck ("thumbnails/" <> show mapId <> ".jpg") defaultGetObjectOptions
+        case statE of
+          Right _ -> return $ "https://" <> buck <> "." <> host <> "/thumbnails/" <> show mapId <> ".jpg"
+          Left _ -> do
+            let cache = _appState_thumbnailCache st
+            now <- liftIO $ getTime Monotonic
+            shouldUpdateS3 <- atomically $ do
+              bM <- lookupSTM False mapId cache now
+              case bM of
+                Nothing -> do
+                  insertSTM mapId () cache (Just $ TimeSpec 60 0)
+                  return True
+                Just _ -> return False
+            when shouldUpdateS3 do
+              void $ forkIO $ do
+                withSystemTempDirectory "map-monitor-download" \dir -> do
+                  runReq defaultHttpConfig do
+                    reqBr Network.HTTP.Req.GET (https "trackmania.exchange" /: "mapthumb" /~ mapId) NoReqBody (header "User-Agent" "teggot@proton.me; unbeaten-maps-monitor project") $ \r -> do
+                      runConduitRes $ (responseBodySource r) .| sinkFileBS (dir </> show mapId)
+                  runProcess_ (proc "vipsthumbnail" [(dir </> show mapId), "--size", "300x300", "--output", dir </> "out.jpg" <> "[Q=90]"])
+                  void $ liftIO $ runMinioWith conn $ do
+                    fPutObject buck ("thumbnails/" <> show mapId <> ".jpg") (dir </> "out.jpg") defaultPutObjectOptions
+            return $ "https://trackmania.exchange/mapthumb/" <> show mapId
+      resp $ redirectTo $ url
+
+  notifyMapBeaten mapUid = do
+    runAppState do 
+      void $ forkIO $ do
+        logInfo $ "Notify request: " <> displayShow mapUid
+        now <- liftIO $ getTime Monotonic
+        notifyCache <- view $ notifyCacheL
+        whenM (atomically do
+          existsM <- lookupSTM False mapUid notifyCache now
+          case existsM of
+            Just _ -> return False
+            Nothing -> do
+              insertSTM mapUid () notifyCache Nothing
+              return True
+          ) do
+            queryAcid (GetMapByUid mapUid) >>= \case
+              Nothing -> pass
+              Just tmmap -> do
+                when (isMapUnbeaten tmmap) do
+                  runConduit $ Conduit.yield tmmap .| refreshMapRecordC Nothing .| sinkNull
+                  refreshCaches
+    return NoContent
+
 -- return $ Left tmmaps
 -- Right _ -> do
 --   return $ Right mapId
 -- return tmmaps
 
 tmxApiServer :: ServerT TMXApi AppM
-tmxApiServer = unbeaten :<|> unbeatenV2 :<|> unbeatenLeaderboard :<|> beaten :<|> unbeatenCount :<|> doPurgeCache
+tmxApiServer
+     = unbeaten
+  :<|> unbeatenV2
+  :<|> unbeatenLeaderboard
+  :<|> beaten
+  :<|> unbeatenCount
+  :<|> doPurgeCache
+  :<|> mapsBeatenInfo
  where
   beaten = do
     collectBeatenAtsResponse
@@ -230,8 +319,17 @@ tmxApiServer = unbeaten :<|> unbeatenV2 :<|> unbeatenLeaderboard :<|> beaten :<|
     refreshCaches
     return NoContent
 
+  mapsBeatenInfo mapUids = do
+    when (length mapUids > 64) $ throwError err401
+    runAppState $ do
+      host <- view $ appSettingsL . settings_s3_creds . s3_creds_host
+      maps <- filter (not . _tmm_hiddenOnTmx) <$> queryAcid (GetMapsByUid mapUids)
+      return $ collectMapInfoResponse host maps
+
 managementApiServer :: AuthResult AUser -> ServerT ManagementAPI AppM
-managementApiServer (Authenticated auser) = managementReportMap :<|> managementDeleteReport :<|> managementAddMissingMap
+managementApiServer (Authenticated auser) =
+       (managementReportMap :<|> managementDeleteReport :<|> managementAddMissingMap)
+  :<|> (postMessage :<|> pingConnected :<|> publishGrid)
  where
   managementReportMap tmxId payload = do
     -- putText $ "Reporting map: " <> show tmxId <> " with payload: " <> show payload
@@ -250,10 +348,133 @@ managementApiServer (Authenticated auser) = managementReportMap :<|> managementD
       addMissingMaps [tmxId]
     refreshCaches
     return NoContent
+
+  postMessage gId message = do
+    when (Text.null message) $ throwError err401
+    runAppState $ do
+      bbAcid <- view gridDBL
+      now <- getCurrentTime
+      update' bbAcid $ UpdateBBTable now $ BBTUAddChatMessage (ID gId) (ChatMessage 0 message (_auser_uid auser) (PosixTS now))
+      return NoContent
+
+  publishGrid pgBody = do
+    runAppState $ do
+      bbAcid <- view gridDBL
+      uuid <- liftIO $ nextRandom 
+      now <- getCurrentTime
+      let grid = Grid
+            { _bb_uuid = (ID $ T.pack $ toString uuid)
+            , _bb_name = _pg_name pgBody
+            , _bb_mapUids = _pg_mapIds pgBody
+            , _bb_size = _pg_size pgBody
+            , _bb_chatLog = mempty
+            , _bb_authorUid = (_auser_uid auser)
+            , _bb_createdAt = PosixTS now
+            , _bb_updatedAt = PosixTS now
+            }
+
+      update' bbAcid $ UpdateBBTable now $ BBTUAddBoard grid
+      return grid
+
+  pingConnected gId' = do
+    runAppState $ do
+        void $ forkIO $ do
+            let gId = ID gId'
+            cache <- view gridConnectionCacheL
+            now <- (PosixTS . (addUTCTime 30)) <$> getCurrentTime
+            nowMonotonic <- liftIO $ getTime Monotonic
+            atomically $ do
+                bM <- lookupSTM False gId cache nowMonotonic
+                case bM of
+                    Nothing -> insertSTM gId (Map.fromList [(_auser_uid auser, now)]) cache Nothing
+                    Just players -> insertSTM gId (Map.insert (_auser_uid auser) now players) cache Nothing
+      
+    return NoContent
+
 managementApiServer _ = throwAll err404
 
+gridApiServer :: ServerT GridAPI AppM
+gridApiServer = getGrid :<|> getGridWithMapInfo :<|> getGrids
+ where
+  getGrid gId updatedAfterM = do
+    runAppState $ do
+      bbAcid <- view gridDBL
+      case updatedAfterM of
+        Nothing -> query' bbAcid $ GetBoard (ID gId)
+        Just after -> query' bbAcid $ GetBoardUpdatedAfter (ID gId) after
+
+  getGridWithMapInfo gId = do
+    runAppState $ do
+      bbAcid <- view gridDBL
+      host <- view $ appSettingsL . settings_s3_creds . s3_creds_host
+      gridM <- query' bbAcid $ GetBoard (ID gId)
+      case gridM of
+        Nothing -> return Nothing
+        Just grid -> do
+          maps <- queryAcid $ GetMapsByUid (fmap TrackUid (_bb_mapUids grid))
+          return $ Just $
+            GridWithMapsResponse
+            { _gwmr_grid = grid
+            , _gwmr_maps = collectMapInfoResponse host $ filter (not . _tmm_hiddenOnTmx) maps
+            }
+
+  getGrids = do
+    runAppState $ do
+      bbAcid <- view gridDBL
+      mapM enrichGrid =<< query' bbAcid GetLastBoards
+
+getGridPlayerCount :: MonadIO m => ID -> GridConnectionsCache -> m Int
+getGridPlayerCount gId cache = do
+  playersM <- liftIO $ Data.Cache.lookup cache gId
+  case playersM of
+    Nothing -> return 0
+    Just players -> do
+      now <- PosixTS <$> getCurrentTime
+      return $ length $ filter (> now) $ Map.elems players
+
+enrichGrid :: (MonadIO m, MonadReader env m, HasGridConnectionsCache env) => Grid -> m EnrichedGrid
+enrichGrid grid = do
+  cache <- view gridConnectionCacheL
+  EnrichedGrid <$> pure grid <*> getGridPlayerCount (_bb_uuid grid) cache
+
+collectMapInfo :: Text -> TMMap -> MapInfo
+collectMapInfo host tmmap@(TMMap{..})
+  = MapInfo
+    { _mi_trackId = _tmm_tmxId 
+    , _mi_trackUid = _tmm_uid 
+    , _mi_trackName = _tmm_name 
+    , _mi_authorLogin = fromMaybe "N/A" (_tmm_authorUid )
+    , _mi_tags = Text.intercalate "," (show <$> _tmm_tags )
+    , _mi_mapType = "TM_Race"
+    , _mi_authorTime = _tmm_authorMedal 
+    , _mi_wr = fromMaybe (-1) (_tmmr_time <$> _tmm_currentWR )
+    , _mi_nbPlayers = fromMaybe (-1) (_tmm_nbPlayers )
+    , _mi_isHidden = isJust (_tmm_hiddenReason )
+    , _mi_reason = fromMaybe "" (_tmm_hiddenReason )
+    , _mi_atSetByPlugin = fromMaybe False (_tmm_atSetByPlugin )
+    , _mi_reported = (\(k, (_, r)) -> (k, r)) <$> Map.assocs (_tmm_reportedBy )
+    , _mi_uploadedTimestamp = maybe 0 (nominalDiffTimeToSeconds . utcTimeToPOSIXSeconds) (_tmm_uploadedAt )
+    , _mi_validation =
+        case _tmm_validationReplay  of
+        Nothing -> (False, "")
+        Just (url, _) -> (True, maybe "" (\x -> "https://" <> "map-monitor-replays" <> "." <> host <> "/ghosts/" <> x <> ".Ghost.Gbx") url)
+    , _mi_fileSize = fromMaybe (-1) $ _tmm_fileSize 
+    , _mi_info = Set.toList $ _tmm_info 
+
+    , _mi_isBeaten = not $ isMapUnbeaten tmmap 
+    , _mi_atBeatenBy = _tmmr_userId <$> _tmm_currentWR 
+    , _mi_atBeatenTimestamp = _tmmr_timestamp <$> _tmm_currentWR 
+    }
+
+collectMapInfoResponse :: Text -> [TMMap] -> MapInfoResponse
+collectMapInfoResponse host maps
+  = MapInfoResponse
+    { _mir_keys = ["TrackID", "TrackUID", "Track_Name", "AuthorLogin", "Tags", "MapType", "AuthorTime", "WR", "NbPlayers", "IsHidden", "Reason", "AtSetByPlugin", "Reported", "UploadedTimestamp", "Validation", "FileSize", "Hints", "IsBeaten", "ATBeatenTimestamp", "ATBeatenUsers"]
+    , _mir_tracks = collectMapInfo host <$> maps
+    }
+
 trustedUsers :: [Text]
-trustedUsers = ["c331bdbf-2182-4a51-813d-87d6f0f209c5", "65ce1935-d166-42b3-89a6-6345ccf41865", "59b84907-59fb-4455-b31d-b0cc44c36ec7", "bce4d579-dc66-43b5-9d57-eb1fb58dd450", "296a77c2-1c19-4236-9a3e-28c8c01e6312", "52f40bee-ef2e-44b9-baf0-067f39dbc45a", "247d5f09-eaa4-4495-9363-b7e69dd42db5", "98b7dfd7-6706-47f4-9b47-6362e9daf7a2", "f520329f-cbb7-45f4-83d3-9b8681a21c6c", "cd81f22a-c92f-48b9-8aa3-72f904c62b66"]
+trustedUsers = ["c331bdbf-2182-4a51-813d-87d6f0f209c5", "65ce1935-d166-42b3-89a6-6345ccf41865", "59b84907-59fb-4455-b31d-b0cc44c36ec7", "bce4d579-dc66-43b5-9d57-eb1fb58dd450", "296a77c2-1c19-4236-9a3e-28c8c01e6312", "52f40bee-ef2e-44b9-baf0-067f39dbc45a", "247d5f09-eaa4-4495-9363-b7e69dd42db5", "98b7dfd7-6706-47f4-9b47-6362e9daf7a2", "f520329f-cbb7-45f4-83d3-9b8681a21c6c", "cd81f22a-c92f-48b9-8aa3-72f904c62b66", "c4d583af-15c4-4f6f-8188-a2b6aa0c5e09"]
 
 authApiServer :: ServerT AuthAPI AppM
 authApiServer = authOpenplanetToken :<|> authIsTrusted
@@ -322,7 +543,7 @@ htmxServer = uploadFile :<|> mapByTmxId
             Just dbmap -> return $ "<span>" <> show (unTMXId $ _tmm_tmxId dbmap) <> ": " <> _tmm_name dbmap <> ", " <> show (_tmm_authorMedal dbmap) <> "ms" <> (if isMapUnbeaten dbmap then " (unbeaten)" else " <span style=\"color: yellow;\">(beaten)</span>") <> "</span>"
 
 server1 :: AppState -> FilePath -> ServerT MapMonitorAPI AppM
-server1 st staticPath = tmxApiServer :<|> downloadMapsServer st :<|> managementApiServer :<|> authApiServer :<|> staticServer :<|> htmxServer :<|> dbDump
+server1 st staticPath = tmxApiServer :<|> downloadMapsServer st :<|> managementApiServer :<|> gridApiServer :<|> authApiServer :<|> staticServer :<|> htmxServer :<|> dbDump
  where
   staticServer = do
     serveDirectoryWebApp staticPath
@@ -340,7 +561,6 @@ fallbackApp _ sendResponse = do
 
 app :: Servant.Server.Context '[CookieSettings, JWTSettings, ResponseCache] -> AppState -> Application
 app cfg appState inReq sendResponse = do
-  -- putText $ "Request: " <> show inReq
   let
     staticPath = appState ^. appSettingsL . settings_static
     servantApp =
@@ -364,7 +584,7 @@ collectBeatenAtsResponse :: (MonadIO m, MonadReader env m, HasState env) => m Re
 collectBeatenAtsResponse = do
   st <- queryAcid GetMapMonitorState
   let
-    maps = filter (not . isMapUnbeaten) $ toDescList (Proxy @WrTimestamp) $ _mms_maps st
+    maps = filter (not . _tmm_hiddenOnTmx) $ filter (not . isMapUnbeaten) $ toDescList (Proxy @WrTimestamp) $ _mms_maps st
     allMaps = take 200 $ maps
     below300k = take 200 $ filter ((< 300000) . _tmm_tmxId) maps
     below200k = take 200 $ filter ((< 200000) . _tmm_tmxId) maps
@@ -393,6 +613,38 @@ collectBeatenAtsResponse = do
     , fromMaybe "N/A" (_tmmr_userId <$> _tmm_currentWR tmmap)
     , fromMaybe 123456 (_tmm_nbPlayers tmmap)
     )
+
+-- bingoMapInfo :: (MonadIO m, MonadReader env m, HasState env) => [TMXId] -> m BingoBoardResponse
+-- bingoMapInfo mapIds = do
+--   st <- queryAcid GetMapMonitorState
+--   let
+--     maps = filter (not . _tmm_hiddenOnTmx) $ filter (not . isMapUnbeaten) $ toDescList (Proxy @WrTimestamp) $ _mms_maps st @~ mapIds
+--   return $
+--     RecentlyBeatenAtsResponse
+--       { _rbar_keys = ["TrackID", "TrackUID", "Track_Name", "AuthorLogin", "Tags", "MapType", "AuthorTime", "WR", "LastChecked", "ATBeatenTimestamp", "ATBeatenUsers", "NbPlayers", "IsBeaten"]
+--       , _rbar_all = asTracks $ toRow <$> allMaps
+--       , _rbar_below100k = asTracks $ toRow <$> below100k
+--       , _rbar_below200k = asTracks $ toRow <$> below200k
+--       , _rbar_below300k = asTracks $ toRow <$> below300k
+--       }
+--  where
+--   asTracks lst = BingoBoardResponse (length lst) lst
+--   toRow tmmap =
+--     ( _tmm_tmxId tmmap
+--     , _tmm_uid tmmap
+--     , _tmm_name tmmap
+--     , fromMaybe "N/A" (_tmm_authorUid tmmap)
+--     , Text.intercalate "," (show <$> _tmm_tags tmmap)
+--     , "TM_Race"
+--     , _tmm_authorMedal tmmap
+--     , fromMaybe (-1) (_tmmr_time <$> _tmm_currentWR tmmap)
+--     , fromMaybe (-1) (_tmmr_timestamp <$> _tmm_currentWR tmmap)
+--     , fromMaybe (-1) (_tmmr_timestamp <$> _tmm_currentWR tmmap)
+--     , fromMaybe "N/A" (_tmmr_userId <$> _tmm_currentWR tmmap)
+--     , fromMaybe 123456 (_tmm_nbPlayers tmmap)
+--     , not $ isMapUnbeaten tmmap
+--     )
+
 
 collectUnbeatenAtsResponse :: (MonadIO m, MonadReader env m, HasState env, HasAppSettings env) => m (UnbeatenAtsResponse UnbeatenAtTrack)
 collectUnbeatenAtsResponse = do

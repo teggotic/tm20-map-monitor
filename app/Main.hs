@@ -31,20 +31,28 @@ import UnliftIO.Resource
 data Options
   = Options
   { opt_runScan :: !Bool
+  , opt_port :: !Int
+  , opt_acidPort :: !Int
+  , opt_gridAcidPort :: !Int
   }
   deriving (Show)
 
 optsP :: Parser Options
-optsP = Options <$> flag True False (long "no-scan" <> help "Disable map monitoring")
+optsP = Options
+  <$> flag True False (long "no-scan" <> help "Disable map monitoring")
+  <*> option auto (long "port" <> short 'p' <> value 8081 <> help "Port to listen on")
+  <*> option auto (long "acid-port" <> value 8082)
+  <*> option auto (long "grid-port" <> value 8084)
 
 runMain :: (MonadUnliftIO m, MonadFail m) => Options -> m ()
 runMain opts = runResourceT $ do
   putText "Starting up"
   (_, acid) <- allocate (liftIO $ openLocalState (MapMonitorState mempty mempty)) (liftIO . closeAcidState)
+  (_, gridAcid) <- allocate (liftIO $ openLocalState (mempty)) (liftIO . closeAcidState)
   putText "Opened acid state"
   checkMapFileQueue <- newTQueueIO
 
-  runInApp acid checkMapFileQueue $ do
+  runInApp acid gridAcid checkMapFileQueue $ do
     logInfo "Loaded environment"
     spawnThread $ forever do
       tryAny (processMapFileQueue checkMapFileQueue)
@@ -54,7 +62,10 @@ runMain opts = runResourceT $ do
       refreshCaches
 
     spawnThread do
-      liftIO $ acidServer skipAuthenticationCheck 8082 acid
+      liftIO $ acidServer skipAuthenticationCheck (fromIntegral $ opt_acidPort opts) acid
+
+    spawnThread do
+      liftIO $ acidServer skipAuthenticationCheck (fromIntegral $ opt_gridAcidPort opts) gridAcid
 
     when (opt_runScan opts) do
       spawnThread do
@@ -88,7 +99,7 @@ runMain opts = runResourceT $ do
     st <- ask
     let
       settings =
-        setPort 8081 $
+        setPort (opt_port opts) $
           defaultSettings
       cookieCfg = defaultCookieSettings
       cfg = cookieCfg :. (_appState_jwtSettings st) :. (_appState_responseCache st) :. EmptyContext
@@ -105,7 +116,7 @@ runMain opts = runResourceT $ do
 
 runDev :: IO ()
 runDev = do
-  runMain $ Options False
+  runMain $ Options False 8081 8082 8084
 
 main :: (MonadUnliftIO m, MonadFail m) => m ()
 main = do

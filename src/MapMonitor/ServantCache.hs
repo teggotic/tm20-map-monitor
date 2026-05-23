@@ -21,7 +21,6 @@ import Network.Wai (Request (rawPathInfo, requestMethod), responseLBS)
 import Network.Wai.Internal (Response (..))
 import Protolude hiding (Handler)
 import Servant
-import Servant.Server
 import Servant.Server.Internal.Delayed (runAction)
 import Servant.Server.Internal.RouteResult
 import Servant.Server.Internal.Router

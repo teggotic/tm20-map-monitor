@@ -30,6 +30,8 @@ module MapMonitor.DB (
   RemoveMap (..),
   GetMapById (..),
   GetMapsByIds (..),
+  GetMapByUid (..),
+  GetMapsByUid (..),
   IsKnownId (..),
   GetAllKnownIds (..),
   UploadedAt (..),
@@ -40,6 +42,7 @@ module MapMonitor.DB (
   WrTimestamp (..),
   TryUpdateMapVersion (..),
   SetTrustedUsers (..),
+  TrackUid (..),
   TMMapIxs,
   IxEntry,
   reportMap,
@@ -69,6 +72,7 @@ import GHC.Exts (IsList (fromList))
 import Protolude
 import qualified RIO.Set as Set
 import qualified RIO.Text as Text
+import Servant (FromHttpApiData)
 
 data TMXMapType
   = MT_Race
@@ -97,7 +101,7 @@ $(deriveSafeCopy 0 'base ''TMMapRecord)
 newtype TMXId
   = TMXId {unTMXId :: Int}
   deriving (Show, Eq, Ord)
-  deriving newtype (ToJSON, FromJSON, Num)
+  deriving newtype (ToJSON, FromJSON, Num, FromHttpApiData)
 
 $(deriveSafeCopy 0 'base ''TMXId)
 
@@ -255,6 +259,12 @@ instance Ord TMMap where
 newtype HiddenOnTmx = HiddenOnTmx Bool
   deriving (Show, Eq, Ord)
 
+newtype TrackUid = TrackUid Text
+  deriving (Show, Eq, Ord)
+  deriving newtype (ToJSON, FromJSON)
+
+$(deriveSafeCopy 0 'base ''TrackUid)
+
 newtype UploadedAt = UploadedAt UTCTime
   deriving (Show, Eq, Ord)
 
@@ -267,7 +277,7 @@ newtype WrTimestamp = WrTimestamp UTCTime
 newtype OmittedFromPlugin = OmittedFromPlugin Bool
   deriving (Show, Eq, Ord)
 
-type TMMapIxs = '[TMXId, IsBeaten, TrackType, HiddenOnTmx, UploadedAt, HasNadeoInfo, WrTimestamp, OmittedFromPlugin]
+type TMMapIxs = '[TMXId, TrackUid, IsBeaten, TrackType, HiddenOnTmx, UploadedAt, HasNadeoInfo, WrTimestamp, OmittedFromPlugin]
 type IxEntry = IxSet TMMapIxs TMMap
 
 instance ToJSON (IxSet TMMapIxs TMMap) where
@@ -277,6 +287,7 @@ instance IxSet.Indexable TMMapIxs TMMap where
   indices =
     ixList
       (ixFun $ \tmMap -> [_tmm_tmxId tmMap])
+      (ixFun $ \tmMap -> [TrackUid $ _tmm_uid tmMap])
       (ixFun $ \tmMap -> [bool Beaten Unbeaten $ isMapUnbeaten tmMap])
       (ixFun $ \tmMap -> [TrackType $ _tmm_mapType tmMap])
       (ixFun $ \tmMap -> [HiddenOnTmx $ _tmm_hiddenOnTmx tmMap])
@@ -539,6 +550,14 @@ getMapById :: TMXId -> Query MapMonitorState (Maybe TMMap)
 getMapById tmxId = do
   asks $ getOne . (@= tmxId) . _mms_maps
 
+getMapByUid :: Text -> Query MapMonitorState (Maybe TMMap)
+getMapByUid uid = do
+  asks $ getOne . (@= TrackUid uid) . _mms_maps
+
+getMapsByUid :: [TrackUid] -> Query MapMonitorState [TMMap]
+getMapsByUid uids = do
+  asks $ IxSet.toList . (@+ uids) . _mms_maps
+
 tryUpdateMapVersion :: TMMap -> Update MapMonitorState (Maybe TMMap)
 tryUpdateMapVersion mp = do
   db <- gets _mms_maps
@@ -570,7 +589,14 @@ getMapsByIds ids = do
 
 getMaps :: Query MapMonitorState [TMMap]
 getMaps = do
-  asks $ filter (\x -> (_tmm_hasClones x /= Just True)) . IxSet.toList . (@= (HiddenOnTmx False)) . (@= HasNadeoInfo True) . (@= (TrackType $ Just MT_Race)) . (@= Unbeaten) . _mms_maps
+  asks $
+    filter ((/= Just True) . _tmm_hasClones)
+    . filter ((== False) . _tmm_hiddenOnTmx)
+    . IxSet.toList
+    . (@= HasNadeoInfo True)
+    . (@= (TrackType $ Just MT_Race))
+    . (@= Unbeaten)
+    . _mms_maps
 
 getMapMonitorState :: Query MapMonitorState MapMonitorState
 getMapMonitorState = ask
@@ -591,7 +617,7 @@ setTrustedUsers :: Set Text -> Update MapMonitorState ()
 setTrustedUsers us = do
   mms_trustedUsers .= us
 
-$(makeAcidic ''MapMonitorState ['updateMaps', 'addNewMaps, 'addNewMaps', 'getMaps, 'getMapMonitorState, 'hideMap, 'setAtSetByPlugin, 'getMapsByIds, 'removeMap, 'getMapById, 'isKnownId, 'getAllKnownIds, 'tryUpdateMapVersion, 'setTrustedUsers, 'replaceMap])
+$(makeAcidic ''MapMonitorState ['updateMaps', 'addNewMaps, 'addNewMaps', 'getMaps, 'getMapMonitorState, 'hideMap, 'setAtSetByPlugin, 'getMapsByIds, 'removeMap, 'getMapById, 'isKnownId, 'getAllKnownIds, 'tryUpdateMapVersion, 'setTrustedUsers, 'replaceMap, 'getMapByUid, 'getMapsByUid])
 
 updateMaps :: (MonadIO m) => AcidState MapMonitorState -> [TMMapPatch] -> m [TMMap]
 updateMaps _ [] = return []

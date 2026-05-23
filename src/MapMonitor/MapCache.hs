@@ -17,7 +17,7 @@ import qualified RIO.Text as Text
 import UnliftIO
 
 withMapFile :: (MonadUnliftIO m, MonadReader env m, HasS3Connection env, HasLogFunc env) => TMMap -> (Text -> m a) -> m (Maybe a)
-withMapFile tmmap@(TMMap{_tmm_tmxId = TMXId tmxId, _tmm_uid = uid}) action = do
+withMapFile tmmap@(TMMap{_tmm_tmxId = TMXId tmxId}) action = do
   resE <- tryAny $ do
     withSystemTempDirectory "map-monitor-download" \dir -> do
       let outFile = dir </> show tmxId <.> "Map.Gbx"

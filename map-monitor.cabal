@@ -33,9 +33,9 @@ library
       Lib
       MapMonitor.API
       MapMonitor.ATCheck
-      MapMonitor.CachedAPIResponses
       MapMonitor.Common
       MapMonitor.DB
+      MapMonitor.GridDB
       MapMonitor.Integrations
       MapMonitor.MapCache
       MapMonitor.MapMonitorTools

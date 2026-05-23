@@ -35,6 +35,7 @@ import UnliftIO.Concurrent
 import UnliftIO.Exception (bracket)
 import UnliftIO.Resource
 import UnliftIO.STM
+import MapMonitor.GridDB (BBTable)
 
 data CollectCacheState
   = CollectCacheState
@@ -50,11 +51,14 @@ instance HasState CollectCacheState where
 instance HasAppSettings CollectCacheState where
   appSettingsL = ccs_settings
 
-runInApp :: (MonadUnliftIO m) => AcidState MapMonitorState -> TQueue TMMap -> ReaderT AppState m b -> m b
-runInApp acid checkMapFileQueue m = do
+runInApp :: (MonadUnliftIO m) => AcidState MapMonitorState -> AcidState BBTable -> TQueue TMMap -> ReaderT AppState m b -> m b
+runInApp acid gridAcid checkMapFileQueue m = do
   settings <- liftIO $ input auto "./settings.dhall"
 
   cache <- liftIO $ newCache (Just $ TimeSpec 60 0)
+  gridConnectionCache <- liftIO $ newCache (Just $ TimeSpec (10 * 60) 0)
+  thumbnailCache <- liftIO $ newCache Nothing
+  notifyCache <- liftIO $ newCache (Just $ TimeSpec 5 0)
 
   jwtAccessKey <-
     liftIO $
@@ -118,6 +122,10 @@ runInApp acid checkMapFileQueue m = do
                           }
                     , _appState_displayNamesCache = displayNamesCache
                     , _appState_responseCache = ResponseCache cache
+                    , _appState_notifyCache = notifyCache
+                    , _appState_gridDB = gridAcid
+                    , _appState_thumbnailCache = thumbnailCache
+                    , _appState_gridConnectionCache = gridConnectionCache
                     }
             runReaderT m appState
 
@@ -128,24 +136,27 @@ runInApp acid checkMapFileQueue m = do
         hSetBuffering h LineBuffering
         go h
 
-runTemporary :: (MonadUnliftIO m) => AcidState MapMonitorState -> ReaderT AppState m b -> m b
-runTemporary acid m = do
+runTemporary :: (MonadUnliftIO m) => AcidState MapMonitorState -> AcidState BBTable -> ReaderT AppState m b -> m b
+runTemporary acid gridAcid m = do
   x <- newTQueueIO
-  runInApp acid x m
+  runInApp acid gridAcid x m
 
 runRemotely :: (MonadUnliftIO m) => PortNumber -> ReaderT AppState m c -> m c
 runRemotely port m = do
   bracket
     (liftIO $ openRemoteState @MapMonitorState skipAuthenticationPerform "localhost" port)
-    (liftIO . closeAcidState)
-    (\acid -> runTemporary acid m)
+    (liftIO . closeAcidState) $ \acid -> do
+        -- bracket
+        --     (liftIO $ openLocalState (mempty))
+        --     (liftIO . closeAcidState) $ \gridAcid -> do
+                runTemporary acid undefined m
 
-runLocally :: (MonadUnliftIO m) => ReaderT AppState m c -> m c
-runLocally m = do
-  bracket
-    (liftIO $ openLocalState (MapMonitorState mempty mempty))
-    (liftIO . closeAcidState)
-    (\acid -> runTemporary acid m)
+-- runLocally :: (MonadUnliftIO m) => ReaderT AppState m c -> m c
+-- runLocally m = do
+--   bracket
+--     (liftIO $ openLocalState (MapMonitorState mempty mempty))
+--     (liftIO . closeAcidState)
+--     (\acid -> runTemporary acid m)
 
 spawnThread :: (MonadResource m, MonadUnliftIO m) => m () -> m ()
 spawnThread action = do
