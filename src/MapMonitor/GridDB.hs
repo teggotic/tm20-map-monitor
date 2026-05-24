@@ -14,13 +14,15 @@ module MapMonitor.GridDB where
 import Control.Lens
 import Data.Sequence
 import Data.Acid
+import Data.Foldable1
 import Data.Aeson as Aeson (FromJSON, ToJSON)
 import Data.Aeson.TH
 import Data.IxSet.Typed hiding (fromList)
 import qualified Data.IxSet.Typed as IxSet
 import Data.SafeCopy
 import Data.Time
-import Protolude
+import Protolude hiding (maximum)
+import qualified Data.Map as Map
 import qualified RIO.Text as Text
 import MapMonitor.DB
 import Data.Aeson.Types (ToJSON(toJSON), FromJSON (parseJSON))
@@ -56,18 +58,22 @@ $(deriveSafeCopy 0 'base ''ChatMessage)
 
 newtype ID = ID { unID :: Text }
   deriving (Eq, Show, Ord)
-  deriving newtype (ToJSON, FromJSON, Hashable)
+  deriving newtype (ToJSON, FromJSON, Hashable, FromHttpApiData)
 
 $(deriveSafeCopy 0 'base ''ID)
+
+inactivityTimeout :: NominalDiffTime
+inactivityTimeout = 30
 
 data Grid
   = Grid
   { _bb_uuid :: !ID
-  , _bb_name :: Text
+  , _bb_name :: !Text
   , _bb_mapUids :: ![(Text)]
   , _bb_size :: !Int
   , _bb_chatLog :: !(Seq ChatMessage)
-  , _bb_authorUid :: Text
+  , _bb_authorUid :: !Text
+  , _bb_players :: !(Map Text PosixTS)
   , _bb_createdAt :: !PosixTS
   , _bb_updatedAt :: !PosixTS
   }
@@ -84,17 +90,23 @@ instance Ord Grid where
 newtype CreatedAt = CreatedAt UTCTime
   deriving (Eq, Show, Ord)
 
-type BBIndexes = '[ID, CreatedAt]
+newtype InactiveAfter = InactiveAfter UTCTime
+  deriving (Eq, Show, Ord)
+
+type BBIndexes = '[ID, CreatedAt, InactiveAfter]
 type BBTable = IxSet BBIndexes Grid
 
 instance IxSet.Indexable BBIndexes Grid where
   indices = ixList
     (ixFun $ \bb -> [_bb_uuid bb])
     (ixFun $ \bb -> [CreatedAt $ unPosixTS $ _bb_createdAt bb])
+    (ixFun $ \bb -> [InactiveAfter $ fromMaybe (posixSecondsToUTCTime 0) $ fmap (unPosixTS . Data.Foldable1.maximum) $ nonEmpty $ Map.elems $ _bb_players bb])
 
 data BBTableUpdate
   = BBTUAddBoard Grid
   | BBTUAddChatMessage ID ChatMessage
+  | BBTUPingConnected ID Text
+  | BBTUDisconnected ID Text
 
 $(deriveSafeCopy 0 'base ''BBTableUpdate)
 
@@ -117,14 +129,36 @@ getLastBoards :: Query BBTable [Grid]
 getLastBoards = do
   asks $ Protolude.take 10 . toDescList (Proxy @CreatedAt)
 
+getActiveBoards :: UTCTime -> Int -> Query BBTable [Grid]
+getActiveBoards now n = do
+  asks $ Protolude.take n . toDescList (Proxy @CreatedAt) . (@> InactiveAfter now)
+
 updateBBTable :: UTCTime -> BBTableUpdate -> Update BBTable ()
 updateBBTable _   (BBTUAddBoard board) = do
   modify $ updateIx (_bb_uuid board) board
-updateBBTable now (BBTUAddChatMessage bId msg) = do
-  gets (getOne . getEQ bId)
+updateBBTable now (BBTUAddChatMessage gId msg) = do
+  gets (getOne . getEQ gId)
     >>= \case
       Nothing -> pass
       Just board -> do
-        modify $ updateIx bId ((addChatMessage board msg) {_bb_updatedAt = PosixTS now}) 
+        modify $ updateIx gId ((addChatMessage board msg) {_bb_updatedAt = PosixTS now}) 
+updateBBTable now (BBTUPingConnected gId userUid) = do
+  gets (getOne . getEQ gId)
+    >>= \case
+      Nothing -> pass
+      Just board -> do
+        modify $ updateIx gId $
+          board { _bb_players = Map.insert userUid (PosixTS $ addUTCTime inactivityTimeout now) $ Map.filter (> PosixTS now) $ _bb_players board
+                -- , _bb_updatedAt = PosixTS now
+                } 
+updateBBTable now (BBTUDisconnected gId userUid) = do
+  gets (getOne . getEQ gId)
+    >>= \case
+      Nothing -> pass
+      Just board -> do
+        modify $ updateIx gId $
+          board { _bb_players = Map.filter (> PosixTS now) $ Map.delete userUid $ _bb_players board
+                -- , _bb_updatedAt = PosixTS now
+                }
 
-$(makeAcidic ''BBTable ['getBoard, 'updateBBTable, 'getLastBoards, 'getBoardUpdatedAfter])
+$(makeAcidic ''BBTable ['getBoard, 'updateBBTable, 'getLastBoards, 'getBoardUpdatedAfter, 'getActiveBoards])

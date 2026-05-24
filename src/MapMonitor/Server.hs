@@ -55,13 +55,14 @@ import UnliftIO.Concurrent
 import UnliftIO.STM
 import Conduit
 import System.Clock (getTime, Clock (Monotonic), TimeSpec (TimeSpec))
-import MapMonitor.GridDB (BBTable, GetBoard (..), BBTableUpdate (..), Grid (..), ID (..), UpdateBBTable (..), GetLastBoards (..), PosixTS (..), GetBoardUpdatedAfter (..), ChatMessage (..))
+import MapMonitor.GridDB (BBTable, GetBoard (..), BBTableUpdate (..), Grid (..), ID (..), UpdateBBTable (..), PosixTS (..), GetBoardUpdatedAfter (..), ChatMessage (..), GetActiveBoards (..))
 import Data.Acid.Advanced (query', update')
 import Data.UUID (toString)
 import UnliftIO.Temporary
 import Network.HTTP.Req.Conduit (responseBodySource)
 import RIO.FilePath ((</>))
 import System.Process.Typed (proc, runProcess_)
+import Data.Acid.Abstract
 
 type GridConnectionsCache = Cache ID (Map Text PosixTS)
 
@@ -90,7 +91,6 @@ data AppState
   , _appState_notifyCache :: !(Cache Text ())
   , _appState_gridDB :: (AcidState BBTable)
   , _appState_thumbnailCache :: !(Cache Int ())
-  , _appState_gridConnectionCache :: !GridConnectionsCache
   }
 
 $(makeLenses ''AppState)
@@ -155,9 +155,6 @@ instance HasNotifyCache AppState where
 
 instance HasGridDB AppState where
   gridDBL = appState_gridDB
-
-instance HasGridConnectionsCache AppState where
-  gridConnectionCacheL = appState_gridConnectionCache
   
 type AppM = ReaderT AppState Servant.Server.Handler
 
@@ -329,7 +326,7 @@ tmxApiServer
 managementApiServer :: AuthResult AUser -> ServerT ManagementAPI AppM
 managementApiServer (Authenticated auser) =
        (managementReportMap :<|> managementDeleteReport :<|> managementAddMissingMap)
-  :<|> (postMessage :<|> pingConnected :<|> publishGrid)
+  :<|> (postMessage :<|> pingConnected :<|> pingDisconnected :<|> publishGrid)
  where
   managementReportMap tmxId payload = do
     -- putText $ "Reporting map: " <> show tmxId <> " with payload: " <> show payload
@@ -354,7 +351,7 @@ managementApiServer (Authenticated auser) =
     runAppState $ do
       bbAcid <- view gridDBL
       now <- getCurrentTime
-      update' bbAcid $ UpdateBBTable now $ BBTUAddChatMessage (ID gId) (ChatMessage 0 message (_auser_uid auser) (PosixTS now))
+      update' bbAcid $ UpdateBBTable now $ BBTUAddChatMessage gId (ChatMessage 0 message (_auser_uid auser) (PosixTS now))
       return NoContent
 
   publishGrid pgBody = do
@@ -368,6 +365,7 @@ managementApiServer (Authenticated auser) =
             , _bb_mapUids = _pg_mapIds pgBody
             , _bb_size = _pg_size pgBody
             , _bb_chatLog = mempty
+            , _bb_players = Map.fromList [(_auser_uid auser, PosixTS (30 `addUTCTime` now))]
             , _bb_authorUid = (_auser_uid auser)
             , _bb_createdAt = PosixTS now
             , _bb_updatedAt = PosixTS now
@@ -376,19 +374,18 @@ managementApiServer (Authenticated auser) =
       update' bbAcid $ UpdateBBTable now $ BBTUAddBoard grid
       return grid
 
-  pingConnected gId' = do
+  pingConnected gId = do
     runAppState $ do
-        void $ forkIO $ do
-            let gId = ID gId'
-            cache <- view gridConnectionCacheL
-            now <- (PosixTS . (addUTCTime 30)) <$> getCurrentTime
-            nowMonotonic <- liftIO $ getTime Monotonic
-            atomically $ do
-                bM <- lookupSTM False gId cache nowMonotonic
-                case bM of
-                    Nothing -> insertSTM gId (Map.fromList [(_auser_uid auser, now)]) cache Nothing
-                    Just players -> insertSTM gId (Map.insert (_auser_uid auser) now players) cache Nothing
-      
+      bbAcid <- view gridDBL
+      now <- getCurrentTime
+      void $ liftIO $ scheduleUpdate bbAcid $ UpdateBBTable now $ BBTUPingConnected gId (_auser_uid auser)
+    return NoContent
+
+  pingDisconnected gId = do
+    runAppState $ do
+      bbAcid <- view gridDBL
+      now <- getCurrentTime
+      void $ liftIO $ scheduleUpdate bbAcid $ UpdateBBTable now $ BBTUDisconnected gId (_auser_uid auser)
     return NoContent
 
 managementApiServer _ = throwAll err404
@@ -400,14 +397,14 @@ gridApiServer = getGrid :<|> getGridWithMapInfo :<|> getGrids
     runAppState $ do
       bbAcid <- view gridDBL
       case updatedAfterM of
-        Nothing -> query' bbAcid $ GetBoard (ID gId)
-        Just after -> query' bbAcid $ GetBoardUpdatedAfter (ID gId) after
+        Nothing -> query' bbAcid $ GetBoard gId
+        Just after -> query' bbAcid $ GetBoardUpdatedAfter gId after
 
   getGridWithMapInfo gId = do
     runAppState $ do
       bbAcid <- view gridDBL
       host <- view $ appSettingsL . settings_s3_creds . s3_creds_host
-      gridM <- query' bbAcid $ GetBoard (ID gId)
+      gridM <- query' bbAcid $ GetBoard gId
       case gridM of
         Nothing -> return Nothing
         Just grid -> do
@@ -421,21 +418,8 @@ gridApiServer = getGrid :<|> getGridWithMapInfo :<|> getGrids
   getGrids = do
     runAppState $ do
       bbAcid <- view gridDBL
-      mapM enrichGrid =<< query' bbAcid GetLastBoards
-
-getGridPlayerCount :: MonadIO m => ID -> GridConnectionsCache -> m Int
-getGridPlayerCount gId cache = do
-  playersM <- liftIO $ Data.Cache.lookup cache gId
-  case playersM of
-    Nothing -> return 0
-    Just players -> do
-      now <- PosixTS <$> getCurrentTime
-      return $ length $ filter (> now) $ Map.elems players
-
-enrichGrid :: (MonadIO m, MonadReader env m, HasGridConnectionsCache env) => Grid -> m EnrichedGrid
-enrichGrid grid = do
-  cache <- view gridConnectionCacheL
-  EnrichedGrid <$> pure grid <*> getGridPlayerCount (_bb_uuid grid) cache
+      now <- getCurrentTime
+      query' bbAcid $ GetActiveBoards now 10
 
 collectMapInfo :: Text -> TMMap -> MapInfo
 collectMapInfo host tmmap@(TMMap{..})

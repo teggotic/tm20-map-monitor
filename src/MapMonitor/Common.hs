@@ -17,7 +17,6 @@ module MapMonitor.Common (
   HasResponseCache (..),
   HasNotifyCache (..),
   HasGridDB (..),
-  HasGridConnectionsCache (..),
   queryAcid,
   updateAcid,
   withAcid1,
@@ -112,9 +111,6 @@ class HasResponseCache env where
 
 class HasNotifyCache env where
   notifyCacheL :: Lens' env (Cache Text ())
-
-class HasGridConnectionsCache env where
-  gridConnectionCacheL :: Lens' env (Cache ID (Map Text PosixTS))
 
 queryAcid :: (MethodState b ~ MapMonitorState, MonadReader s m, HasState s, QueryEvent b, MonadIO m) => b -> m (MethodResult b)
 queryAcid q =

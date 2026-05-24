@@ -20,7 +20,7 @@ import Servant.API
 import Servant.Auth
 import Servant.Auth.JWT
 import Servant.Multipart
-import MapMonitor.GridDB (Grid, PosixTS)
+import MapMonitor.GridDB (Grid, PosixTS, ID)
 import Data.Fixed (Pico)
 import GHC.Exts
 import RIO.Time (UTCTime)
@@ -250,8 +250,9 @@ type ManagementAPI =
   "management" :> ( "report_map" :> Capture "mapId" Int :> ReqBody '[JSON] ReportMapPayload :> Post '[JSON] NoContent
                :<|> "report_map" :> Capture "mapId" Int :> Delete '[JSON] NoContent
                :<|> "add_missing_map" :> Capture "mapId" Int :> Post '[JSON] NoContent
-  ) :<|> "grid" :> ( Capture "gridId" Text :> "messages" :> ReqBody '[JSON] Text :> Post '[JSON] NoContent
-                :<|> Capture "gridId" Text :> "ping-connected" :> Post '[JSON] NoContent
+  ) :<|> "grid" :> ( Capture "gridId" ID :> "messages" :> ReqBody '[JSON] Text :> Post '[JSON] NoContent
+                :<|> Capture "gridId" ID :> "ping-connected" :> Post '[JSON] NoContent
+                :<|> Capture "gridId" ID :> "ping-disconnected" :> Post '[JSON] NoContent
                 :<|> ReqBody '[JSON] PublishGridBody :> Post '[JSON] Grid
                    )
 
@@ -299,8 +300,8 @@ data ExportDBResponse
 $(deriveToJSON defaultOptions{fieldLabelModifier = drop (Text.length "_edr_")} ''ExportDBResponse)
 
 type GridAPI = "grid" :>
-    ( Capture "gridId" Text :> QueryParam "updatedAfter" PosixTS :> Get '[JSON] (Maybe Grid)
- :<|> Capture "gridId" Text :> "with-maps" :> Get '[JSON] (Maybe GridWithMapsResponse)
- :<|> Get '[JSON] [EnrichedGrid])
+    ( Capture "gridId" ID :> QueryParam "updatedAfter" PosixTS :> Get '[JSON] (Maybe Grid)
+ :<|> Capture "gridId" ID :> "with-maps" :> Get '[JSON] (Maybe GridWithMapsResponse)
+ :<|> Get '[JSON] [Grid])
   
 type MapMonitorAPI = TMXApi :<|> DownloadMapAPI :<|> (Auth '[JWT] AUser :> ManagementAPI) :<|> GridAPI :<|> AuthAPI :<|> ("static" :> Raw) :<|> HtmxAPI :<|> ("db-dump" :> Get '[JSON] ExportDBResponse)

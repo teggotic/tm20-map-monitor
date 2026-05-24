@@ -56,7 +56,6 @@ runInApp acid gridAcid checkMapFileQueue m = do
   settings <- liftIO $ input auto "./settings.dhall"
 
   cache <- liftIO $ newCache (Just $ TimeSpec 60 0)
-  gridConnectionCache <- liftIO $ newCache (Just $ TimeSpec (10 * 60) 0)
   thumbnailCache <- liftIO $ newCache Nothing
   notifyCache <- liftIO $ newCache (Just $ TimeSpec 5 0)
 
@@ -125,7 +124,6 @@ runInApp acid gridAcid checkMapFileQueue m = do
                     , _appState_notifyCache = notifyCache
                     , _appState_gridDB = gridAcid
                     , _appState_thumbnailCache = thumbnailCache
-                    , _appState_gridConnectionCache = gridConnectionCache
                     }
             runReaderT m appState
 
