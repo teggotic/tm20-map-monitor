@@ -7,6 +7,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE NoImplicitPrelude #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
 
 -- {-# OPTIONS_GHC -ddump-splices #-}
 module MapMonitor.GridDB where
@@ -14,7 +15,6 @@ module MapMonitor.GridDB where
 import Control.Lens
 import Data.Sequence
 import Data.Acid
-import Data.Foldable1
 import Data.Aeson as Aeson (FromJSON, ToJSON)
 import Data.Aeson.TH
 import Data.IxSet.Typed hiding (fromList)
@@ -22,13 +22,11 @@ import qualified Data.IxSet.Typed as IxSet
 import Data.SafeCopy
 import Data.Time
 import Protolude hiding (maximum)
-import qualified Data.Map as Map
 import qualified RIO.Text as Text
 import MapMonitor.DB
 import Data.Aeson.Types (ToJSON(toJSON), FromJSON (parseJSON))
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds, posixSecondsToUTCTime)
-import Data.Fixed (Pico)
-import Servant.API (FromHttpApiData(..))
+import Servant.API (FromHttpApiData(..), ToHttpApiData(..))
 
 newtype PosixTS = PosixTS { unPosixTS :: UTCTime }
   deriving newtype (Show, Eq, Ord)
@@ -36,13 +34,21 @@ newtype PosixTS = PosixTS { unPosixTS :: UTCTime }
 $(deriveSafeCopy 0 'base ''PosixTS)
 
 instance ToJSON PosixTS where
-  toJSON = toJSON @Int . floor . utcTimeToPOSIXSeconds . unPosixTS
+  toJSON = toJSON . posixTsToInt
 
 instance FromJSON PosixTS where
-  parseJSON a = PosixTS . posixSecondsToUTCTime . fromIntegral <$> parseJSON @Int a
+  parseJSON a = posixTsFromInt <$> parseJSON a
 
 instance FromHttpApiData PosixTS where
-  parseUrlPiece x = PosixTS . posixSecondsToUTCTime . fromIntegral <$> parseUrlPiece @Int x
+  parseUrlPiece x = posixTsFromInt <$> parseUrlPiece x
+
+instance ToHttpApiData PosixTS where
+  toUrlPiece = toUrlPiece . posixTsToInt
+
+posixTsFromInt :: Int -> PosixTS
+posixTsFromInt = PosixTS . posixSecondsToUTCTime . fromIntegral
+posixTsToInt :: PosixTS -> Int
+posixTsToInt = floor . utcTimeToPOSIXSeconds . unPosixTS
 
 data ChatMessage
   = ChatMessage
@@ -58,7 +64,7 @@ $(deriveSafeCopy 0 'base ''ChatMessage)
 
 newtype ID = ID { unID :: Text }
   deriving (Eq, Show, Ord)
-  deriving newtype (ToJSON, FromJSON, Hashable, FromHttpApiData)
+  deriving newtype (ToJSON, FromJSON, Hashable, FromHttpApiData, ToHttpApiData)
 
 $(deriveSafeCopy 0 'base ''ID)
 
@@ -69,11 +75,10 @@ data Grid
   = Grid
   { _bb_uuid :: !ID
   , _bb_name :: !Text
-  , _bb_mapUids :: ![(Text)]
+  , _bb_mapUids :: ![TrackUid]
   , _bb_size :: !Int
   , _bb_chatLog :: !(Seq ChatMessage)
   , _bb_authorUid :: !Text
-  , _bb_players :: !(Map Text PosixTS)
   , _bb_createdAt :: !PosixTS
   , _bb_updatedAt :: !PosixTS
   }
@@ -90,23 +95,25 @@ instance Ord Grid where
 newtype CreatedAt = CreatedAt UTCTime
   deriving (Eq, Show, Ord)
 
+newtype GridAuthor = GridAuthor Text
+  deriving (Eq, Show, Ord)
+
 newtype InactiveAfter = InactiveAfter UTCTime
   deriving (Eq, Show, Ord)
 
-type BBIndexes = '[ID, CreatedAt, InactiveAfter]
+type BBIndexes = '[ID, CreatedAt, GridAuthor]
 type BBTable = IxSet BBIndexes Grid
 
 instance IxSet.Indexable BBIndexes Grid where
   indices = ixList
     (ixFun $ \bb -> [_bb_uuid bb])
     (ixFun $ \bb -> [CreatedAt $ unPosixTS $ _bb_createdAt bb])
-    (ixFun $ \bb -> [InactiveAfter $ fromMaybe (posixSecondsToUTCTime 0) $ fmap (unPosixTS . Data.Foldable1.maximum) $ nonEmpty $ Map.elems $ _bb_players bb])
+    (ixFun $ \bb -> [GridAuthor $ _bb_authorUid bb])
 
 data BBTableUpdate
   = BBTUAddBoard Grid
   | BBTUAddChatMessage ID ChatMessage
-  | BBTUPingConnected ID Text
-  | BBTUDisconnected ID Text
+  | BBTUUpdateMapPool ID [TrackUid]
 
 $(deriveSafeCopy 0 'base ''BBTableUpdate)
 
@@ -129,9 +136,13 @@ getLastBoards :: Query BBTable [Grid]
 getLastBoards = do
   asks $ Protolude.take 10 . toDescList (Proxy @CreatedAt)
 
-getActiveBoards :: UTCTime -> Int -> Query BBTable [Grid]
-getActiveBoards now n = do
-  asks $ Protolude.take n . toDescList (Proxy @CreatedAt) . (@> InactiveAfter now)
+getBoardsByIds :: [ID] -> Query BBTable [Grid]
+getBoardsByIds ids = do
+  asks $ toDescList (Proxy @CreatedAt) . (@+ ids)
+
+getBoardsByUser :: Text -> Int -> Query BBTable [Grid]
+getBoardsByUser authorUid n = do
+  asks $ \db -> Protolude.take n $ toDescList (Proxy @CreatedAt) $ db @= GridAuthor authorUid
 
 updateBBTable :: UTCTime -> BBTableUpdate -> Update BBTable ()
 updateBBTable _   (BBTUAddBoard board) = do
@@ -142,23 +153,14 @@ updateBBTable now (BBTUAddChatMessage gId msg) = do
       Nothing -> pass
       Just board -> do
         modify $ updateIx gId ((addChatMessage board msg) {_bb_updatedAt = PosixTS now}) 
-updateBBTable now (BBTUPingConnected gId userUid) = do
+updateBBTable now (BBTUUpdateMapPool gId mapUids) = do
   gets (getOne . getEQ gId)
     >>= \case
       Nothing -> pass
       Just board -> do
         modify $ updateIx gId $
-          board { _bb_players = Map.insert userUid (PosixTS $ addUTCTime inactivityTimeout now) $ Map.filter (> PosixTS now) $ _bb_players board
-                -- , _bb_updatedAt = PosixTS now
+          board { _bb_mapUids = mapUids
+                , _bb_updatedAt = PosixTS now
                 } 
-updateBBTable now (BBTUDisconnected gId userUid) = do
-  gets (getOne . getEQ gId)
-    >>= \case
-      Nothing -> pass
-      Just board -> do
-        modify $ updateIx gId $
-          board { _bb_players = Map.filter (> PosixTS now) $ Map.delete userUid $ _bb_players board
-                -- , _bb_updatedAt = PosixTS now
-                }
 
-$(makeAcidic ''BBTable ['getBoard, 'updateBBTable, 'getLastBoards, 'getBoardUpdatedAfter, 'getActiveBoards])
+$(makeAcidic ''BBTable ['getBoard, 'updateBBTable, 'getLastBoards, 'getBoardUpdatedAfter, 'getBoardsByIds, 'getBoardsByUser])

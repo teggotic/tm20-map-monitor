@@ -25,6 +25,7 @@ import Servant.Server.Internal.Delayed (runAction)
 import Servant.Server.Internal.RouteResult
 import Servant.Server.Internal.Router
 import System.Clock (TimeSpec (TimeSpec))
+import Servant.Client
 
 data CacheKey = CacheKey
   { _ck_path :: !Text
@@ -72,7 +73,7 @@ instance
 
     computeR = (\f req rsp -> f req (\res -> do cacheResponse req res; rsp res)) <$> route (Proxy :: Proxy api) ctx action
 
-    cacheResponse :: Request -> RouteResult Response -> IO ()
+    cacheResponse :: Request -> RouteResult Network.Wai.Internal.Response -> IO ()
     cacheResponse request (Route (ResponseBuilder status headers builder)) = do
       let cKey = (CacheKey (decodeUtf8 $ rawPathInfo request) (requestMethod request))
       Cache.insert' cache (Just $ TimeSpec (fromInteger $ natVal (Proxy @n)) 0) cKey (CachedResponse (toLazyByteString builder) status headers)
@@ -80,3 +81,10 @@ instance
       pass
 
   hoistServerWithContext _ pc nt s = hoistServerWithContext (Proxy :: Proxy api) pc nt s
+
+instance HasClient m subapi =>
+  HasClient m (Cached n res :> subapi) where
+
+  type Client m (Cached n res :> subapi) = Client m subapi
+  clientWithRoute pm Proxy = clientWithRoute pm (Proxy :: Proxy subapi)
+  hoistClientMonad pm _ f cl = hoistClientMonad pm (Proxy :: Proxy subapi) f cl

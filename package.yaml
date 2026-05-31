@@ -59,6 +59,7 @@ dependencies:
 - http-api-data
 - servant-auth
 - servant-auth-server
+- servant-auth-client
 - network
 - prometheus-client
 - prometheus-metrics-ghc
@@ -81,6 +82,10 @@ dependencies:
 - cache
 - bytestring
 - text
+- random-strings
+- random
+- stm-containers
+- list-t
 
 default-extensions:
 - LambdaCase

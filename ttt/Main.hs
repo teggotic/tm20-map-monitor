@@ -1,13 +1,19 @@
 {-# LANGUAGE NoImplicitPrelude #-}
+{-# OPTIONS_GHC -Wno-missing-export-lists #-}
+{-# OPTIONS_GHC -Wno-missing-signatures #-}
 
 module Main where
 
-import Protolude hiding (atomically, forkIO)
+import GHC.Stack
+import qualified Data.ByteString as BS
+import Protolude hiding (threadDelay, atomically, forkIO)
 import qualified RIO.Text as T
+import qualified Prelude
 
 import Control.Lens
 import MapMonitor.Common
 
+import Network.HTTP.Client as NHC (ManagerSettings (managerModifyRequest), Request (requestHeaders), newManager)
 import Conduit
 import Data.Aeson
 import Data.Conduit.TQueue (sinkTBQueue)
@@ -26,6 +32,29 @@ import System.FilePath.Posix
 import UnliftIO.Async
 import UnliftIO.Concurrent
 import UnliftIO.STM
+import Servant.API
+import Servant.Client
+import MapMonitor.API (ManagementAPI, GridAPI, AUser (..), AuthAPI, InternalAuth(..))
+import Servant.Auth.Server
+import RIO.Time (getCurrentTime, addUTCTime)
+import MapMonitor.Server
+import Data.UUID.V4 (nextRandom)
+import System.Directory (doesFileExist)
+import Data.Time.Clock (secondsToNominalDiffTime)
+import Data.UUID (toString)
+import Network.HTTP.Client (ManagerSettings(..))
+import Network.HTTP.Client.TLS (tlsManagerSettings)
+import Network.HTTP.Types (hUserAgent)
+import Control.Category (id)
+import MapMonitor.GridDB
+import System.Random
+import Servant.Auth.Client
+import UnliftIO.Temporary (withSystemTempDirectory)
+import UnliftIO (tryAny)
+import Network.HTTP.Req
+import Options.Applicative.Builder (header)
+import Network.HTTP.Req.Conduit (responseBodySource)
+import System.Process.Typed (proc, runProcess_)
 
 downloadTMXMaps startId = do
   q <- newTBQueueIO 20
@@ -48,13 +77,86 @@ downloadTMXMaps startId = do
       tmxMapsSource 200 startId
         .| sinkTBQueue q
 
+(getActiveGrids' :<|> getExpiredGrids' :<|> getGrid' :<|> getGridWithMaps') :<|> createAuthClient = client (Proxy @GridAPI)
+_ :<|> _ :<|> fakeAuth' = client (Proxy @AuthAPI)
+
+
+
+-- gridId = "aWUS9k1lqv"
+
+runFakeClient :: (HasCallStack, MonadUnliftIO m) => Text -> ClientEnv -> m ()
+runFakeClient gId c = do
+  accountId <- fmap (T.pack . toString) $ liftIO $ nextRandom
+  auth <- fmap (fromRight undefined) $ liftIO $ runClientM (fakeAuth' accountId) c
+  let (gridSendMessage' :<|> gridPingConnected' :<|> gridPingDisconnected' :<|> _) = createAuthClient (Token $ encodeUtf8 $ _ia_token auth)
+  forever do
+    mapConcurrently_ id
+        [ forever do
+            void $ (liftIO $ runClientM (getActiveGrids') c)
+            threadDelay (10 * 10 ^ 6)
+        , let loop ts = do
+                threadDelay (1 * 10 ^ 6)
+                gridME <- liftIO $ runClientM (getGrid' (ID gId) ts) c
+                case gridME of
+                    Left err -> print err
+                    Right Nothing -> loop ts
+                    Right (Just grid) -> loop (Just $ _bb_updatedAt grid)
+           in forever do loop Nothing
+        , do
+            grid <- fmap (fromMaybe undefined . fromRight undefined) $ liftIO $ runClientM (getGrid' (ID gId) Nothing) c
+            forever do
+              x <- randomRIO (5,60)
+              isPlaying <- randomIO 
+              midx <- randomRIO (0,63)
+              forM_ [(1 ::Int)..x] \_ -> do
+                void $ liftIO $ runClientM (gridPingConnected' (ID gId) (if isPlaying then Just (_bb_mapUids grid Prelude.!! midx) else Nothing)) c
+                threadDelay (5 * 10 ^ 6)
+              void $ liftIO $ runClientM (gridPingDisconnected' (ID gId)) c
+              threadDelay (5 * 10 ^ 6)
+        ]
+
+spawnFakeClients :: (HasCallStack, MonadUnliftIO m) => Text -> Int -> m ()
+spawnFakeClients gId n = do
+  manager' <-
+    liftIO $
+      NHC.newManager
+        tlsManagerSettings
+          { managerModifyRequest = \req -> do
+              return req{requestHeaders = requestHeaders req <> [(hUserAgent, "teggot@proton.me; unbeaten-maps-monitor project")]}
+          }
+  -- let mockClient = (mkClientEnv manager' (BaseUrl Http "localhost" 8081 ""))
+  let mockClient = (mkClientEnv manager' (BaseUrl Servant.Client.Http "91.98.121.255" 7442 ""))
+  mapConcurrently_ (\i -> do putText ("spwaned " <> show i) >> runFakeClient gId mockClient) [1..n]
+
 main :: IO ()
 main = do
   getArgs >>= \case
+    ["cache-thumbnails"] -> do
+      runRemotely 9099 $ do
+        conn <- view s3ConnL
+        buck <- view s3BucketL
+        maps <- filterMaps ((@= Unbeaten) . (@= HiddenOnTmx False))
+        flip (pooledMapConcurrentlyN_ 40) (zip [1 :: Int ..] maps) \(i, TMMap {_tmm_tmxId = TMXId mapId}) -> do
+          withSystemTempDirectory "map-monitor-download" \dir -> void $ tryAny do
+            statE <- liftIO $ runMinioWith conn do
+              statObject buck ("thumbnails/" <> show mapId <> ".jpg") defaultGetObjectOptions
+            case statE of
+              Right _ -> pass
+              Left err -> do
+                print err
+                runReq defaultHttpConfig do
+                  reqBr Network.HTTP.Req.GET (https "trackmania.exchange" Network.HTTP.Req./: "mapthumb" /~ mapId) NoReqBody (Network.HTTP.Req.header "User-Agent" "teggot@proton.me; unbeaten-maps-monitor project") $ \r -> do
+                    runConduitRes $ (responseBodySource r) .| sinkFileBS (dir </> show mapId)
+                runProcess_ (proc "vipsthumbnail" [(dir </> show mapId), "--size", "300x300", "--output", dir </> "out.jpg" <> "[Q=90]"])
+                void $ liftIO $ runMinioWith conn $ do
+                  fPutObject buck ("thumbnails/" <> show mapId <> ".jpg") (dir </> "out.jpg") defaultPutObjectOptions
+                putText $ "Cached thumbnail for " <> show mapId
+    ["stress-test", gId, n] -> do
+      spawnFakeClients (T.pack gId) $ Prelude.read n
     ["refresh-file-sizes"] -> do
       runRemotely 9099 $ do
         mps <- queryAcid GetMaps
-        pooledForConcurrentlyN_ 20 (zip [0 ..] mps) \(i, mp) -> do
+        pooledForConcurrentlyN_ 20 (zip [0::Int ..] mps) \(i, mp) -> do
           updateMapSize mp
           logInfo $ ("updated " <> displayShow i <> "/" <> displayShow (length mps))
     ["recheck-set-with-plugin"] -> do

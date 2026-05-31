@@ -27,6 +27,8 @@ import UnliftIO.STM
 import Options.Applicative
 import UnliftIO.Exception
 import UnliftIO.Resource
+import Lib (scanActiveGrids)
+import RIO.Time
 
 data Options
   = Options
@@ -67,26 +69,36 @@ runMain opts = runResourceT $ do
     spawnThread do
       liftIO $ acidServer skipAuthenticationCheck (fromIntegral $ opt_gridAcidPort opts) gridAcid
 
+    -- spawnThread $ forever do
+    --   startAfter <- (30 `addUTCTime`) <$> getCurrentTime
+    --   tryAny (scanActiveGrids)
+    --     >>= \case
+    --       Left err -> logError $ "Error scanning active grids" <> displayShow err
+    --       Right _ -> pass
+    --   now <- getCurrentTime
+    --   when (now < startAfter) do
+    --     threadDelay (floor $ (nominalDiffTimeToSeconds $ startAfter `diffUTCTime` now) * 1000000)
+
     when (opt_runScan opts) do
       spawnThread do
         forM_ [(0 :: Int), 20 ..] $ \i -> do
           res <- tryAny $ do
             refreshMissingInfo
 
-            when (i `mod` 600 == 0) do
+            when (i `mod` 100 == 0) do
               recheckTmxInfo
               recheckMapsUnhidden
 
             when (i /= 0) do
-              if i `mod` 180 == 0
+              if i `mod` 120 == 0
                 then refreshUnbeatenMaps
                 else
                   if i `mod` 60 == 0
                     then refreshRecentUnbeatenMaps
                     else pass
             if i `mod` 24 * 60 == 0
-              then Protolude.void $ scanTmx (Just 1000)
-              else Protolude.void $ scanTmx (Just 80)
+              then Protolude.void $ scanTmx (Just 2000)
+              else Protolude.void $ scanTmx (Just 200)
 
           whenLeft res $ \err ->
             logError $ "Exception happened: " <> displayShow err

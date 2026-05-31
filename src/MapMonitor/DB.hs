@@ -72,7 +72,7 @@ import GHC.Exts (IsList (fromList))
 import Protolude
 import qualified RIO.Set as Set
 import qualified RIO.Text as Text
-import Servant (FromHttpApiData)
+import Servant (FromHttpApiData, ToHttpApiData)
 
 data TMXMapType
   = MT_Race
@@ -101,7 +101,7 @@ $(deriveSafeCopy 0 'base ''TMMapRecord)
 newtype TMXId
   = TMXId {unTMXId :: Int}
   deriving (Show, Eq, Ord)
-  deriving newtype (ToJSON, FromJSON, Num, FromHttpApiData)
+  deriving newtype (ToJSON, FromJSON, Num, FromHttpApiData, ToHttpApiData)
 
 $(deriveSafeCopy 0 'base ''TMXId)
 
@@ -261,7 +261,7 @@ newtype HiddenOnTmx = HiddenOnTmx Bool
 
 newtype TrackUid = TrackUid Text
   deriving (Show, Eq, Ord)
-  deriving newtype (ToJSON, FromJSON)
+  deriving newtype (ToJSON, FromJSON, FromHttpApiData, ToHttpApiData)
 
 $(deriveSafeCopy 0 'base ''TrackUid)
 

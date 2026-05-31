@@ -162,7 +162,7 @@ getMapRecord tmmap = do
         logError $ "Error: " <> displayShow err
         return (mapPatch, tmmap)
       Right (GetMapLeaderboardResponse{_gmlr_tops = [GetMapLeaderboardTop{_gmlt_top = [topRecord]}]}) -> do
-        logInfo $ "Got record for map " <> displayShow (unTMXId $ _tmm_tmxId tmmap, _tmm_uid tmmap)
+        logInfo $ "Got record for map " <> displayShow (unTMXId $ _tmm_tmxId tmmap, _tmm_uid tmmap, topRecord)
         return $ ((mapPatch & tmmp_actions %~ (TMPCurrentWR (Just $ TMMapRecord (_gmlte_accountId topRecord) (_gmlte_score topRecord) (_gmlte_timestamp topRecord)) :)), tmmap)
       err@_ -> do
         logInfo $ "No records found for map " <> displayShow (_tmm_uid tmmap) <> " with error: " <> displayShow err

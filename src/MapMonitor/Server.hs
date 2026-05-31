@@ -9,13 +9,12 @@
 module MapMonitor.Server
 where
 
-import Data.UUID.V4
 import Control.Category (id)
 import Control.Exception (throw)
 import Control.Lens hiding ((.=), (<.>))
 import Control.Retry (limitRetries)
 import Data.Acid
-import Data.Cache
+import Data.Cache as Cache
 import Data.Fixed
 import Data.IxSet.Typed
 import qualified Data.Map as Map
@@ -23,7 +22,6 @@ import qualified Data.Set as Set
 import Data.Time.Clock.POSIX (utcTimeToPOSIXSeconds)
 import MapMonitor.API
 import MapMonitor.API.Nadeo
-import qualified Data.IxSet.Typed as IS
 import MapMonitor.API.OpenPlanet
 import MapMonitor.API.TMX
 import MapMonitor.API.Util
@@ -55,16 +53,17 @@ import UnliftIO.Concurrent
 import UnliftIO.STM
 import Conduit
 import System.Clock (getTime, Clock (Monotonic), TimeSpec (TimeSpec))
-import MapMonitor.GridDB (BBTable, GetBoard (..), BBTableUpdate (..), Grid (..), ID (..), UpdateBBTable (..), PosixTS (..), GetBoardUpdatedAfter (..), ChatMessage (..), GetActiveBoards (..))
-import Data.Acid.Advanced (query', update')
-import Data.UUID (toString)
+import MapMonitor.GridDB (BBTable, GetBoard (..), BBTableUpdate (..), Grid (..), ID (..), UpdateBBTable (..), PosixTS (..), GetBoardUpdatedAfter (..), ChatMessage (..), GetBoardsByIds (..), GetBoardsByUser (..))
 import UnliftIO.Temporary
 import Network.HTTP.Req.Conduit (responseBodySource)
 import RIO.FilePath ((</>))
 import System.Process.Typed (proc, runProcess_)
 import Data.Acid.Abstract
+import Test.RandomStrings
+import qualified StmContainers.Map as STM
+import qualified ListT
 
-type GridConnectionsCache = Cache ID (Map Text PosixTS)
+type GridPlayerDB = Cache Text (Maybe TrackUid)
 
 data AppState
   = AppState
@@ -91,6 +90,7 @@ data AppState
   , _appState_notifyCache :: !(Cache Text ())
   , _appState_gridDB :: (AcidState BBTable)
   , _appState_thumbnailCache :: !(Cache Int ())
+  , _appState_gridPlayers :: (STM.Map ID GridPlayerDB)
   }
 
 $(makeLenses ''AppState)
@@ -238,7 +238,7 @@ downloadMapsServer st = downloadMap :<|> mapThumbnail :<|> notifyMapBeaten
                 Just _ -> return False
             when shouldUpdateS3 do
               void $ forkIO $ do
-                withSystemTempDirectory "map-monitor-download" \dir -> do
+                withSystemTempDirectory "map-monitor-download" \dir -> void $ tryAny do
                   runReq defaultHttpConfig do
                     reqBr Network.HTTP.Req.GET (https "trackmania.exchange" /: "mapthumb" /~ mapId) NoReqBody (header "User-Agent" "teggot@proton.me; unbeaten-maps-monitor project") $ \r -> do
                       runConduitRes $ (responseBodySource r) .| sinkFileBS (dir </> show mapId)
@@ -254,20 +254,23 @@ downloadMapsServer st = downloadMap :<|> mapThumbnail :<|> notifyMapBeaten
         logInfo $ "Notify request: " <> displayShow mapUid
         now <- liftIO $ getTime Monotonic
         notifyCache <- view $ notifyCacheL
+        liftIO $ purgeExpired notifyCache
         whenM (atomically do
-          existsM <- lookupSTM False mapUid notifyCache now
+          existsM <- lookupSTM True mapUid notifyCache now
           case existsM of
             Just _ -> return False
             Nothing -> do
-              insertSTM mapUid () notifyCache Nothing
+              insertSTM mapUid () notifyCache (Just $ TimeSpec 5 0)
               return True
           ) do
-            queryAcid (GetMapByUid mapUid) >>= \case
-              Nothing -> pass
-              Just tmmap -> do
-                when (isMapUnbeaten tmmap) do
-                  runConduit $ Conduit.yield tmmap .| refreshMapRecordC Nothing .| sinkNull
-                  refreshCaches
+            forM_ [1 :: Int .. 5] \_ -> do
+              threadDelay $ 2 * 10 ^ 6
+              queryAcid (GetMapByUid mapUid) >>= \case
+                Nothing -> pass
+                Just tmmap -> do
+                  when (isMapUnbeaten tmmap) do
+                    runConduit $ Conduit.yield tmmap .| refreshMapRecordC Nothing .| sinkNull
+                    refreshCaches
     return NoContent
 
 -- return $ Left tmmaps
@@ -317,7 +320,7 @@ tmxApiServer
     return NoContent
 
   mapsBeatenInfo mapUids = do
-    when (length mapUids > 64) $ throwError err401
+    when (length mapUids > 100) $ throwError err401
     runAppState $ do
       host <- view $ appSettingsL . settings_s3_creds . s3_creds_host
       maps <- filter (not . _tmm_hiddenOnTmx) <$> queryAcid (GetMapsByUid mapUids)
@@ -326,9 +329,9 @@ tmxApiServer
 managementApiServer :: AuthResult AUser -> ServerT ManagementAPI AppM
 managementApiServer (Authenticated auser) =
        (managementReportMap :<|> managementDeleteReport :<|> managementAddMissingMap)
-  :<|> (postMessage :<|> pingConnected :<|> pingDisconnected :<|> publishGrid)
  where
   managementReportMap tmxId payload = do
+    unless (_auser_uid auser `elem` trustedUsers) $ throwError err403
     -- putText $ "Reporting map: " <> show tmxId <> " with payload: " <> show payload
     now <- getCurrentTime
     withAcid2 reportMap (TMXId tmxId) (_auser_uid auser, now, _rmp_reason payload)
@@ -336,62 +339,31 @@ managementApiServer (Authenticated auser) =
     return NoContent
 
   managementDeleteReport tmxId = do
+    unless (_auser_uid auser `elem` trustedUsers) $ throwError err403
     void $ withAcid1 updateMaps $ [TMMapPatch (TMXId tmxId) [TMPReportedBy $ Map.fromList [(_auser_uid auser, Nothing)]]]
     refreshCaches
     return NoContent
 
   managementAddMissingMap tmxId = do
+    unless (_auser_uid auser `elem` trustedUsers) $ throwError err403
     runAppState do
       addMissingMaps [tmxId]
     refreshCaches
     return NoContent
+managementApiServer _ = do
+  throwAll err401
 
-  postMessage gId message = do
-    when (Text.null message) $ throwError err401
-    runAppState $ do
-      bbAcid <- view gridDBL
-      now <- getCurrentTime
-      update' bbAcid $ UpdateBBTable now $ BBTUAddChatMessage gId (ChatMessage 0 message (_auser_uid auser) (PosixTS now))
-      return NoContent
-
-  publishGrid pgBody = do
-    runAppState $ do
-      bbAcid <- view gridDBL
-      uuid <- liftIO $ nextRandom 
-      now <- getCurrentTime
-      let grid = Grid
-            { _bb_uuid = (ID $ T.pack $ toString uuid)
-            , _bb_name = _pg_name pgBody
-            , _bb_mapUids = _pg_mapIds pgBody
-            , _bb_size = _pg_size pgBody
-            , _bb_chatLog = mempty
-            , _bb_players = Map.fromList [(_auser_uid auser, PosixTS (30 `addUTCTime` now))]
-            , _bb_authorUid = (_auser_uid auser)
-            , _bb_createdAt = PosixTS now
-            , _bb_updatedAt = PosixTS now
-            }
-
-      update' bbAcid $ UpdateBBTable now $ BBTUAddBoard grid
-      return grid
-
-  pingConnected gId = do
-    runAppState $ do
-      bbAcid <- view gridDBL
-      now <- getCurrentTime
-      void $ liftIO $ scheduleUpdate bbAcid $ UpdateBBTable now $ BBTUPingConnected gId (_auser_uid auser)
-    return NoContent
-
-  pingDisconnected gId = do
-    runAppState $ do
-      bbAcid <- view gridDBL
-      now <- getCurrentTime
-      void $ liftIO $ scheduleUpdate bbAcid $ UpdateBBTable now $ BBTUDisconnected gId (_auser_uid auser)
-    return NoContent
-
-managementApiServer _ = throwAll err404
+getGridPlayers :: (MonadIO m) => STM.Map ID GridPlayerDB -> ID -> m GridPlayerDB
+getGridPlayers mp k = atomically $ do
+  STM.lookup k mp >>= \case
+    Nothing -> do
+      c <- newCacheSTM $ Just (TimeSpec 60 0)
+      STM.insert c k mp
+      return c
+    Just c -> return c
 
 gridApiServer :: ServerT GridAPI AppM
-gridApiServer = getGrid :<|> getGridWithMapInfo :<|> getGrids
+gridApiServer = (getActiveGrids :<|> getExpiredGridsBy :<|> getGrid :<|> getPlayers :<|> getGridWithMapInfo) :<|> authGrids
  where
   getGrid gId updatedAfterM = do
     runAppState $ do
@@ -408,18 +380,124 @@ gridApiServer = getGrid :<|> getGridWithMapInfo :<|> getGrids
       case gridM of
         Nothing -> return Nothing
         Just grid -> do
-          maps <- queryAcid $ GetMapsByUid (fmap TrackUid (_bb_mapUids grid))
+          maps <- queryAcid $ GetMapsByUid (_bb_mapUids grid)
           return $ Just $
             GridWithMapsResponse
             { _gwmr_grid = grid
             , _gwmr_maps = collectMapInfoResponse host $ filter (not . _tmm_hiddenOnTmx) maps
             }
 
-  getGrids = do
+  getActiveGrids = do
     runAppState $ do
       bbAcid <- view gridDBL
-      now <- getCurrentTime
-      query' bbAcid $ GetActiveBoards now 10
+      players <- view appState_gridPlayers
+      activeIds <- fmap catMaybes $ liftIO $ ListT.toList $ do
+        (gId, c) <- STM.listTNonAtomic players
+        liftIO $ purgeExpired c
+        atomically do
+          sz <- sizeSTM c
+          if sz > 0
+            then return $ Just (gId, sz)
+            else do
+              STM.delete gId players
+              return Nothing
+
+      let mp = Map.fromList activeIds
+      fmap (fmap (\grid -> EnrichedGrid grid $ fromMaybe 0 $ Map.lookup (_bb_uuid grid) mp)) $ query' bbAcid $ GetBoardsByIds $ fmap fst activeIds
+
+  getPlayers gId = do
+    runAppState $ do
+      players <- view appState_gridPlayers
+      cache <- getGridPlayers players gId
+      -- let x :: Int
+      --     x = cache
+      xs <- liftIO $ Cache.toList cache
+      return $ fmap (\(k,v,_) -> (k, v)) xs 
+
+  getExpiredGridsBy userUid = do
+    runAppState $ do
+      bbAcid <- view gridDBL
+      query' bbAcid $ GetBoardsByUser userUid 10
+
+  authGrids (Authenticated auser) = (postMessage :<|> pingConnected :<|> pingDisconnected :<|> replaceMaps :<|> publishGrid)
+    where
+      postMessage gId message = do
+        when (Text.null message) $ throwError err400
+        bbAcid <- runAppState $ view gridDBL
+        now <- getCurrentTime
+        query' bbAcid (GetBoard gId)
+          >>= \case Nothing -> throwError err404
+                    Just _ -> update' bbAcid $ UpdateBBTable now $ BBTUAddChatMessage gId (ChatMessage 0 message (_auser_uid auser) (PosixTS now))
+        return NoContent
+
+      publishGrid pgBody = do
+        when (Text.null $ _pg_name pgBody) $ throwError err400
+        runAppState $ do
+          bbAcid <- view gridDBL
+          now <- getCurrentTime
+          let
+              genNewCode 0 = throw err500
+              genNewCode n = do
+                boardCode <- fmap (ID . T.pack) $ liftIO $ randomString (onlyAlphaNum randomASCII) 10
+                (query' bbAcid $ GetBoard boardCode) >>= \case
+                  Nothing -> return boardCode
+                  Just _ -> genNewCode ((n :: Int) - 1)
+          boardCode <- genNewCode 10
+          let grid = Grid
+                { _bb_uuid = boardCode
+                , _bb_name = _pg_name pgBody
+                , _bb_mapUids = _pg_mapIds pgBody
+                , _bb_size = _pg_size pgBody
+                , _bb_chatLog = mempty
+                , _bb_authorUid = (_auser_uid auser)
+                , _bb_createdAt = PosixTS now
+                , _bb_updatedAt = PosixTS now
+                }
+
+          players <- view appState_gridPlayers
+          cache <- getGridPlayers players boardCode
+          liftIO $ Cache.insert cache (_auser_uid auser) Nothing
+
+          update' bbAcid $ UpdateBBTable now $ BBTUAddBoard grid
+          return grid
+
+      pingConnected gId mapUidM = do
+        -- putText $ "pinged " <> show gId <> " " <> show mapUidM
+        runAppState $ do
+          players <- view appState_gridPlayers
+          cache <- getGridPlayers players gId
+          liftIO $ Cache.insert cache (_auser_uid auser) mapUidM
+          -- void $ liftIO $ scheduleUpdate bbAcid $ UpdateBBTable now $ BBTUPingConnected gId (_auser_uid auser) mapUidM
+          pass
+        return NoContent
+
+      pingDisconnected gId = do
+        runAppState $ do
+          players <- view appState_gridPlayers
+          cache <- getGridPlayers players gId
+          liftIO $ Cache.delete cache (_auser_uid auser)
+          pass
+        return NoContent
+
+      replaceMaps gId mapUids = do
+        runAppState $ do
+          bbAcid <- view gridDBL
+          query' bbAcid (GetBoard gId)
+            >>= \case
+              Nothing -> throw err404
+              Just grid -> do
+                when (_bb_authorUid grid /= _auser_uid auser) $ throw err403
+                now <- getCurrentTime
+                update' bbAcid $ UpdateBBTable now $ BBTUUpdateMapPool gId mapUids
+          query' bbAcid (GetBoard gId)
+            >>= \case
+              Nothing -> throw err500
+              Just grid -> return grid
+
+  authGrids _ = do
+    throwAll err401
+
+
 
 collectMapInfo :: Text -> TMMap -> MapInfo
 collectMapInfo host tmmap@(TMMap{..})
@@ -458,10 +536,10 @@ collectMapInfoResponse host maps
     }
 
 trustedUsers :: [Text]
-trustedUsers = ["c331bdbf-2182-4a51-813d-87d6f0f209c5", "65ce1935-d166-42b3-89a6-6345ccf41865", "59b84907-59fb-4455-b31d-b0cc44c36ec7", "bce4d579-dc66-43b5-9d57-eb1fb58dd450", "296a77c2-1c19-4236-9a3e-28c8c01e6312", "52f40bee-ef2e-44b9-baf0-067f39dbc45a", "247d5f09-eaa4-4495-9363-b7e69dd42db5", "98b7dfd7-6706-47f4-9b47-6362e9daf7a2", "f520329f-cbb7-45f4-83d3-9b8681a21c6c", "cd81f22a-c92f-48b9-8aa3-72f904c62b66", "c4d583af-15c4-4f6f-8188-a2b6aa0c5e09"]
+trustedUsers = ["c331bdbf-2182-4a51-813d-87d6f0f209c5", "65ce1935-d166-42b3-89a6-6345ccf41865", "59b84907-59fb-4455-b31d-b0cc44c36ec7", "bce4d579-dc66-43b5-9d57-eb1fb58dd450", "296a77c2-1c19-4236-9a3e-28c8c01e6312", "52f40bee-ef2e-44b9-baf0-067f39dbc45a", "247d5f09-eaa4-4495-9363-b7e69dd42db5", "98b7dfd7-6706-47f4-9b47-6362e9daf7a2", "f520329f-cbb7-45f4-83d3-9b8681a21c6c", "cd81f22a-c92f-48b9-8aa3-72f904c62b66", "c4d583af-15c4-4f6f-8188-a2b6aa0c5e09", "da2b3afe-7610-4d1a-a45c-1430dfbacf86"]
 
 authApiServer :: ServerT AuthAPI AppM
-authApiServer = authOpenplanetToken :<|> authIsTrusted
+authApiServer = authOpenplanetToken :<|> authIsTrusted :<|> giveAuth
  where
   authOpenplanetToken tok = do
     openplanetSecret <- _settings_openplanetAuthSecret <$> view appSettingsL
@@ -471,16 +549,20 @@ authApiServer = authOpenplanetToken :<|> authIsTrusted
           print err
           throwError err401
         Right (OpenPlanetAuthValidateResponse{_opavr_account_id = accountId}) -> do
-          if accountId `elem` trustedUsers
-            then do
-              ajwt <- asks _appState_jwtSettings
-              now <- getCurrentTime
-              Right newTokBs <- liftIO $ makeJWT (AUser accountId) ajwt (Just $ (secondsToNominalDiffTime $ 60 * 60 * 24) `addUTCTime` now)
-              return $ InternalAuth{_ia_token = decodeUtf8 $ toStrictBytes newTokBs}
-            else throwAll err401
+          ajwt <- asks _appState_jwtSettings
+          now <- getCurrentTime
+          Right newTokBs <- liftIO $ makeJWT (AUser accountId) ajwt (Just $ (secondsToNominalDiffTime $ 60 * 60 * 24) `addUTCTime` now)
+          return $ InternalAuth{_ia_token = decodeUtf8 $ toStrictBytes newTokBs}
 
   authIsTrusted accountId = do
     return $ accountId `elem` trustedUsers
+
+  giveAuth uid = do
+    throwError $ err401
+    -- ajwt <- asks _appState_jwtSettings
+    -- now <- getCurrentTime
+    -- Right newTokBs <- liftIO $ makeJWT (AUser uid) ajwt (Just $ (secondsToNominalDiffTime $ 60 * 60 * 24) `addUTCTime` now)
+    -- return $ InternalAuth{_ia_token = decodeUtf8 $ toStrictBytes newTokBs}
 
 runAppState :: (MonadReader AppState m, MonadIO m) => ReaderT AppState IO a -> m a
 runAppState m = do
@@ -527,7 +609,7 @@ htmxServer = uploadFile :<|> mapByTmxId
             Just dbmap -> return $ "<span>" <> show (unTMXId $ _tmm_tmxId dbmap) <> ": " <> _tmm_name dbmap <> ", " <> show (_tmm_authorMedal dbmap) <> "ms" <> (if isMapUnbeaten dbmap then " (unbeaten)" else " <span style=\"color: yellow;\">(beaten)</span>") <> "</span>"
 
 server1 :: AppState -> FilePath -> ServerT MapMonitorAPI AppM
-server1 st staticPath = tmxApiServer :<|> downloadMapsServer st :<|> managementApiServer :<|> gridApiServer :<|> authApiServer :<|> staticServer :<|> htmxServer :<|> dbDump
+server1 st staticPath = tmxApiServer :<|> downloadMapsServer st :<|> gridApiServer :<|> managementApiServer :<|> authApiServer :<|> staticServer :<|> htmxServer :<|> dbDump
  where
   staticServer = do
     serveDirectoryWebApp staticPath
@@ -554,6 +636,7 @@ app cfg appState inReq sendResponse = do
           (Proxy :: Proxy '[CookieSettings, JWTSettings, ResponseCache])
           (`runReaderT` appState)
           (server1 appState staticPath)
+  -- print $ (rawPathInfo $ inReq) <> (rawQueryString inReq) <> " " <> show (filter (("Authorization" ==) . fst) $ requestHeaders inReq)
   servantApp inReq $ \res ->
     if is404 res
       then fallbackApp inReq sendResponse

@@ -199,6 +199,51 @@ instance ToJSON MapInfo where
         , toJSON _mi_atBeatenBy
         ]
 
+instance FromJSON MapInfo where
+  parseJSON v = 
+    MapInfo
+      <$> parseIndexedJSON parseJSON 0 v
+      <*> parseIndexedJSON parseJSON 1 v
+      <*> parseIndexedJSON parseJSON 2 v
+      <*> parseIndexedJSON parseJSON 3 v
+      <*> parseIndexedJSON parseJSON 4 v
+      <*> parseIndexedJSON parseJSON 5 v
+      <*> parseIndexedJSON parseJSON 6 v
+      <*> parseIndexedJSON parseJSON 7 v
+      <*> parseIndexedJSON parseJSON 8 v
+      <*> parseIndexedJSON parseJSON 9 v
+      <*> parseIndexedJSON parseJSON 10 v
+      <*> parseIndexedJSON parseJSON 11 v
+      <*> parseIndexedJSON parseJSON 12 v
+      <*> parseIndexedJSON parseJSON 13 v
+      <*> parseIndexedJSON parseJSON 14 v
+      <*> parseIndexedJSON parseJSON 15 v
+      <*> parseIndexedJSON parseJSON 16 v
+      <*> parseIndexedJSON parseJSON 17 v
+      <*> parseIndexedJSON parseJSON 18 v
+      <*> parseIndexedJSON parseJSON 19 v
+        -- [ toJSON _mi_trackId      
+        -- , toJSON _mi_trackUid     
+        -- , toJSON _mi_trackName    
+        -- , toJSON _mi_authorLogin  
+        -- , toJSON _mi_tags         
+        -- , toJSON _mi_mapType      
+        -- , toJSON _mi_authorTime   
+        -- , toJSON _mi_wr
+        -- , toJSON _mi_nbPlayers
+        -- , toJSON _mi_isHidden
+        -- , toJSON _mi_reason
+        -- , toJSON _mi_atSetByPlugin
+        -- , toJSON _mi_reported
+        -- , toJSON _mi_uploadedTimestamp
+        -- , toJSON _mi_validation
+        -- , toJSON _mi_fileSize
+        -- , toJSON _mi_info
+        -- , toJSON _mi_isBeaten
+        -- , toJSON _mi_atBeatenTimestamp
+        -- , toJSON _mi_atBeatenBy
+        -- ]
+
 
 data MapInfoResponse
   = MapInfoResponse
@@ -207,7 +252,7 @@ data MapInfoResponse
   }
   deriving (Show)
 
-$(deriveToJSON defaultOptions{fieldLabelModifier = drop (Text.length "_mir_")} ''MapInfoResponse)
+$(deriveJSON defaultOptions{fieldLabelModifier = drop (Text.length "_mir_")} ''MapInfoResponse)
 
 type TMXApi =
   "tmx"
@@ -234,31 +279,28 @@ data GridWithMapsResponse
   , _gwmr_maps :: MapInfoResponse
   }
 
-$(deriveToJSON defaultOptions{fieldLabelModifier = drop (Text.length "_gwmr_")} ''GridWithMapsResponse)
+$(deriveJSON defaultOptions{fieldLabelModifier = drop (Text.length "_gwmr_")} ''GridWithMapsResponse)
 
 data PublishGridBody
   = PublishGridBody
-  { _pg_mapIds :: [Text]
+  { _pg_mapIds :: [TrackUid]
   , _pg_name :: Text
   , _pg_size :: Int
   }
   deriving (Show)
 
-$(deriveFromJSON defaultOptions{fieldLabelModifier = drop (Text.length "_pg_")} ''PublishGridBody)
+$(deriveJSON defaultOptions{fieldLabelModifier = drop (Text.length "_pg_")} ''PublishGridBody)
 
 type ManagementAPI =
   "management" :> ( "report_map" :> Capture "mapId" Int :> ReqBody '[JSON] ReportMapPayload :> Post '[JSON] NoContent
                :<|> "report_map" :> Capture "mapId" Int :> Delete '[JSON] NoContent
                :<|> "add_missing_map" :> Capture "mapId" Int :> Post '[JSON] NoContent
-  ) :<|> "grid" :> ( Capture "gridId" ID :> "messages" :> ReqBody '[JSON] Text :> Post '[JSON] NoContent
-                :<|> Capture "gridId" ID :> "ping-connected" :> Post '[JSON] NoContent
-                :<|> Capture "gridId" ID :> "ping-disconnected" :> Post '[JSON] NoContent
-                :<|> ReqBody '[JSON] PublishGridBody :> Post '[JSON] Grid
-                   )
+  )
 
 type AuthAPI =
   "auth" :> "openplanet" :> ReqBody '[JSON] InternalAuth :> Post '[JSON] InternalAuth
     :<|> "auth" :> "is-trusted" :> Capture "accountId" Text :> Get '[JSON] Bool
+    :<|> "auth" :> "fake-auth" :> Capture "accountId" Text :> Post '[JSON] InternalAuth
 
 data HTML = HTML
 instance Accept HTML where
@@ -299,9 +341,19 @@ data ExportDBResponse
 
 $(deriveToJSON defaultOptions{fieldLabelModifier = drop (Text.length "_edr_")} ''ExportDBResponse)
 
-type GridAPI = "grid" :>
-    ( Capture "gridId" ID :> QueryParam "updatedAfter" PosixTS :> Get '[JSON] (Maybe Grid)
- :<|> Capture "gridId" ID :> "with-maps" :> Get '[JSON] (Maybe GridWithMapsResponse)
- :<|> Get '[JSON] [Grid])
+type GridAPI = "grids" :> (
+        ( "active" :> Get '[JSON] [EnrichedGrid]
+        :<|> "expired" :> Capture "userUid" Text :> Get '[JSON] [Grid]
+        :<|> Capture "gridId" ID :> QueryParam "updatedAfter" PosixTS :> Get '[JSON] (Maybe Grid)
+        :<|> Capture "gridId" ID :> "players" :> Get '[JSON] [(Text, Maybe TrackUid)]
+        :<|> Capture "gridId" ID :> "with-maps" :> Get '[JSON] (Maybe GridWithMapsResponse))
+    :<|> Auth '[JWT] AUser :> (
+             Capture "gridId" ID :> "messages" :> ReqBody '[JSON] Text :> Post '[JSON] NoContent
+        :<|> Capture "gridId" ID :> "ping-connected" :> QueryParam "mapUid" TrackUid :> Post '[JSON] NoContent
+        :<|> Capture "gridId" ID :> "ping-disconnected" :> Post '[JSON] NoContent
+        :<|> Capture "gridId" ID :> "maps" :> ReqBody '[JSON] [TrackUid] :> Post '[JSON] Grid
+        :<|> ReqBody '[JSON] PublishGridBody :> Post '[JSON] Grid
+        )
+    )
   
-type MapMonitorAPI = TMXApi :<|> DownloadMapAPI :<|> (Auth '[JWT] AUser :> ManagementAPI) :<|> GridAPI :<|> AuthAPI :<|> ("static" :> Raw) :<|> HtmxAPI :<|> ("db-dump" :> Get '[JSON] ExportDBResponse)
+type MapMonitorAPI = TMXApi :<|> DownloadMapAPI :<|> GridAPI :<|> (Auth '[JWT] AUser :> ManagementAPI) :<|> AuthAPI :<|> ("static" :> Raw) :<|> HtmxAPI :<|> ("db-dump" :> Get '[JSON] ExportDBResponse)

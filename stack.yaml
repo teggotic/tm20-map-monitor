@@ -10,6 +10,7 @@ extra-deps:
   - git: https://github.com/minio/minio-hs.git
     commit: '3e665784228cba7261560c104b8f1d928e7b5bd4'
   - discord-haskell-1.18.0@sha256:0b88b1c391542b36243647f3533261867a1bd59cb2194519bc4b0e45b9a73797,7032
+  - random-strings-0.1.1.0@sha256:935a7a23dab45411960df77636a29b44ce42b89eeb15f2b1e809d771491fa677,2517
 
 docker:
   enable: false

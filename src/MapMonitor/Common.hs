@@ -48,7 +48,7 @@ import PingRPC
 import Protolude
 import UnliftIO.STM
 import Data.Cache
-import MapMonitor.GridDB(BBTable, ID, PosixTS)
+import MapMonitor.GridDB(BBTable)
 
 data AppSyncVars
   = AppSyncVars

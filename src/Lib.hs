@@ -6,6 +6,7 @@
 
 module Lib where
 
+import qualified Data.Map as Map
 import Control.Concurrent.STM.TSem
 import Control.Lens (view)
 import Control.Lens.TH
@@ -35,7 +36,15 @@ import UnliftIO.Concurrent
 import UnliftIO.Exception (bracket)
 import UnliftIO.Resource
 import UnliftIO.STM
-import MapMonitor.GridDB (BBTable)
+import MapMonitor.GridDB (BBTable, GetBoardsByIds (..), Grid(..))
+import qualified StmContainers.Map as STM
+import Data.Acid.Advanced (query')
+import qualified StmContainers.Map as STM
+import qualified ListT
+import Conduit
+import MapMonitor.Integrations (refreshMapRecordC)
+import Control.Lens.Setter (locally)
+import Control.Lens ((.~))
 
 data CollectCacheState
   = CollectCacheState
@@ -59,9 +68,11 @@ runInApp acid gridAcid checkMapFileQueue m = do
   thumbnailCache <- liftIO $ newCache Nothing
   notifyCache <- liftIO $ newCache (Just $ TimeSpec 5 0)
 
+  gridPlayers <- liftIO $ STM.newIO
+
   jwtAccessKey <-
     liftIO $
-      (doesFileExist "/tmp/jwt-access-key.secret") >>= Protolude.bool generateKey (readKey "/tmp/jwt-access-key.secret")
+      (doesFileExist "/tmp/jwt-access-key.secret") >>= Protolude.bool (generateKey >>= \k -> writeKey "/tmp/jwt-access-key.secret" >> return k) (readKey "/tmp/jwt-access-key.secret")
   manager' <-
     liftIO $
       NHC.newManager
@@ -124,6 +135,7 @@ runInApp acid gridAcid checkMapFileQueue m = do
                     , _appState_notifyCache = notifyCache
                     , _appState_gridDB = gridAcid
                     , _appState_thumbnailCache = thumbnailCache
+                    , _appState_gridPlayers = gridPlayers
                     }
             runReaderT m appState
 
@@ -133,6 +145,19 @@ runInApp acid gridAcid checkMapFileQueue m = do
       withFile logFile AppendMode $ \h -> do
         hSetBuffering h LineBuffering
         go h
+
+scanActiveGrids :: (MonadIO m, MonadReader AppState m, MonadFail m) => m ()
+scanActiveGrids = do
+  local (\x -> x & appState_nadeoRequestRate .~ 1) do
+    players <- view appState_gridPlayers
+    activeIds <- fmap catMaybes $ liftIO $ ListT.toList $ do
+      (gId, c) <- STM.listTNonAtomic players
+      sz <- liftIO $ Data.Cache.size c
+      if sz == 0 then return Nothing else return $ Just (gId, c)
+    forM_ activeIds \(_, c) -> do
+      activeMaps <- fmap (catMaybes . fmap \(_, mp, _) -> mp) $ liftIO $ Data.Cache.toList c
+      maps <- fmap (filter isMapUnbeaten) $ queryAcid $ GetMapsByUid activeMaps
+      runConduit $ Conduit.yieldMany maps .| refreshMapRecordC (Just $ length maps) .| sinkNull
 
 runTemporary :: (MonadUnliftIO m) => AcidState MapMonitorState -> AcidState BBTable -> ReaderT AppState m b -> m b
 runTemporary acid gridAcid m = do
