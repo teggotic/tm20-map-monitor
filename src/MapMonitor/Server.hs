@@ -62,6 +62,7 @@ import Data.Acid.Abstract
 import Test.RandomStrings
 import qualified StmContainers.Map as STM
 import qualified ListT
+import MapMonitor.MapCache (s3MapPath)
 
 type GridPlayerDB = Cache Text (Maybe TrackUid)
 
@@ -197,7 +198,14 @@ downloadMapsServer st = downloadMap :<|> mapThumbnail :<|> notifyMapBeaten
                         >>= \case
                           Left err -> do
                             logError $ "Error: " <> displayShow err
-                            return $ Left []
+                            flip runReaderT st $ do
+                              buck <- view s3BucketL
+                              host <- view $ appSettingsL . settings_s3_creds . s3_creds_host
+                              queryAcid (GetMapById $ TMXId mapId)
+                                >>= \case
+                                  Nothing -> return $ Left []
+                                  Just (TMMap{_tmm_uid = uid}) -> do
+                                    return $ Left $ ["https://" <> buck <> "." <> host <> "/" <> s3MapPath uid]
                           Right res2 -> do
                             logInfo $ "Got " <> displayShow (_gmmr_mapList res2) <> " maps"
                             return $ Left $ _gmmrm_downloadUrl <$> _gmmr_mapList res2
@@ -263,8 +271,8 @@ downloadMapsServer st = downloadMap :<|> mapThumbnail :<|> notifyMapBeaten
               insertSTM mapUid () notifyCache (Just $ TimeSpec 5 0)
               return True
           ) do
-            forM_ [1 :: Int .. 5] \_ -> do
-              threadDelay $ 2 * 10 ^ 6
+            forM_ [1 :: Int, 3, 5, 8, 12] \i -> do
+              threadDelay $ i * (10 ^ (6 :: Int))
               queryAcid (GetMapByUid mapUid) >>= \case
                 Nothing -> pass
                 Just tmmap -> do

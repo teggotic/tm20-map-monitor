@@ -303,7 +303,7 @@ refreshUnbeatenMaps = do
 
 refreshNbPlayers :: (MonadReader env m, HasState env, HasXertrovClient env, MonadUnliftIO m, HasLogFunc env) => m ()
 refreshNbPlayers = do
-  maps <- filter (isJust . _tmm_authorUid) <$> queryAcid GetMaps
+  maps <- filter (null . _tmm_info) . filter (isNothing . _tmm_hiddenReason) . filter (isJust . _tmm_authorUid) <$> queryAcid GetMaps
   -- maps <- filter (\x -> (isJust . _tmm_authorUid $ x) && (isNothing . _tmm_nbPlayers $ x)) <$> queryAcid GetMaps
   flip (pooledMapConcurrentlyN_ 4) maps \tmmap -> do
     runInClient xertrovClientL (xertrovGetNbPlayers (_tmm_uid tmmap)) >>= \case
