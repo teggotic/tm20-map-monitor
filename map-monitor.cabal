@@ -80,6 +80,7 @@ library
     , dhall
     , directory
     , either
+    , extra
     , filepath
     , http-api-data
     , http-client
@@ -169,6 +170,7 @@ executable map-monitor-admin-ui-exe
     , dhall
     , directory
     , either
+    , extra
     , filepath
     , http-api-data
     , http-client
@@ -265,6 +267,7 @@ executable map-monitor-exe
     , dhall
     , directory
     , either
+    , extra
     , filepath
     , http-api-data
     , http-client
@@ -361,6 +364,7 @@ executable map-monitor-ping-bot-exe
     , directory
     , discord-haskell
     , either
+    , extra
     , filepath
     , http-api-data
     , http-client
@@ -455,6 +459,7 @@ executable map-monitor-ttt-exe
     , dhall
     , directory
     , either
+    , extra
     , filepath
     , http-api-data
     , http-client
@@ -550,6 +555,7 @@ executable map-monitor-zmq-exe
     , dhall
     , directory
     , either
+    , extra
     , filepath
     , http-api-data
     , http-client
@@ -645,6 +651,7 @@ test-suite map-monitor-test
     , dhall
     , directory
     , either
+    , extra
     , filepath
     , http-api-data
     , http-client

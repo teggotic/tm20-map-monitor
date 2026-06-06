@@ -391,3 +391,7 @@ updateMapSize tmmap =
   mapFileSize tmmap >>= \case
     Left err -> logError $ displayShow err
     Right sz -> Protolude.void $ withAcid1 updateMaps [TMMapPatch (_tmm_tmxId tmmap) [TMPFileSize sz]]
+
+refreshMapRecord :: (MonadIO m, MonadReader env m, HasLogFunc env,  HasNadeoCoreClient env, HasNadeoTokenState env,  HasNadeoLiveClient env, HasNadeoRequestRate env,  HasNadeoThrottler env, MonadFail m, HasNadeoAuthToken env,  HasState env) => TMMap -> m TMMap
+refreshMapRecord tmmap = 
+  runConduit $ Conduit.yield tmmap .| refreshMapRecordC (Just 1) .| headDefC tmmap

@@ -86,6 +86,7 @@ dependencies:
 - random
 - stm-containers
 - list-t
+- extra
 
 default-extensions:
 - LambdaCase

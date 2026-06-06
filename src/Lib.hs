@@ -66,7 +66,7 @@ runInApp acid gridAcid checkMapFileQueue m = do
 
   cache <- liftIO $ newCache (Just $ TimeSpec 60 0)
   thumbnailCache <- liftIO $ newCache Nothing
-  notifyCache <- liftIO $ newCache (Just $ TimeSpec 5 0)
+  notifyCache <- liftIO $ newCache Nothing
 
   gridPlayers <- liftIO $ STM.newIO
 

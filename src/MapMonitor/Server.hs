@@ -63,6 +63,8 @@ import Test.RandomStrings
 import qualified StmContainers.Map as STM
 import qualified ListT
 import MapMonitor.MapCache (s3MapPath)
+import Control.Monad.Extra (whenJustM)
+import qualified Prelude
 
 type GridPlayerDB = Cache Text (Maybe TrackUid)
 
@@ -255,32 +257,39 @@ downloadMapsServer st = downloadMap :<|> mapThumbnail :<|> notifyMapBeaten
                     fPutObject buck ("thumbnails/" <> show mapId <> ".jpg") (dir </> "out.jpg") defaultPutObjectOptions
             return $ "https://trackmania.exchange/mapthumb/" <> show mapId
       resp $ redirectTo $ url
+  
 
   notifyMapBeaten mapUid = do
-    runAppState do 
-      void $ forkIO $ do
-        logInfo $ "Notify request: " <> displayShow mapUid
-        now <- liftIO $ getTime Monotonic
-        notifyCache <- view $ notifyCacheL
-        liftIO $ purgeExpired notifyCache
-        whenM (atomically do
-          existsM <- lookupSTM True mapUid notifyCache now
-          case existsM of
-            Just _ -> return False
-            Nothing -> do
-              insertSTM mapUid () notifyCache (Just $ TimeSpec 5 0)
-              return True
-          ) do
-            forM_ [1 :: Int, 3, 5, 8, 12] \i -> do
-              threadDelay $ i * (10 ^ (6 :: Int))
-              queryAcid (GetMapByUid mapUid) >>= \case
-                Nothing -> pass
-                Just tmmap -> do
-                  when (isMapUnbeaten tmmap) do
-                    runConduit $ Conduit.yield tmmap .| refreshMapRecordC Nothing .| sinkNull
-                    refreshCaches
+    runAppState do
+      logInfo $ "Notify request: " <> displayShow mapUid
+      now <- liftIO $ getTime Monotonic
+      notifyCache <- view $ notifyCacheL
+
+      allowed <- atomically do
+        existsM <- lookupSTM True mapUid notifyCache now
+        case existsM of
+          Just _ -> return False
+          Nothing -> do
+            insertSTM mapUid () notifyCache (Just $ now + TimeSpec 51 0)
+            return True
+
+      when allowed $ void $ forkIO do
+        let loop [] = pass
+            loop (i:xs) =
+              whenJustM (queryAcid $ GetMapByUid mapUid)
+              $ whenF isMapUnbeaten \tmmap -> do
+                tmmap' <- refreshMapRecord tmmap
+                if (isMapUnbeaten tmmap')
+                then do
+                    threadDelay $ i * 1000000
+                    loop xs
+                else refreshCaches
+        loop [1 :: Int,1,2,3,5,8,13,21]
     return NoContent
 
+whenF :: Applicative f => (a -> Bool) -> (a -> f ()) -> a -> f ()
+whenF f x y = do
+  when (f y) (x y)
 -- return $ Left tmmaps
 -- Right _ -> do
 --   return $ Right mapId
